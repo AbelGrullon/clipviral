@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>Grabar video para Meta</title>
+  <style>
+    :root { --bg: #0d0d14; --panel: #161622; --line: rgba(255,255,255,.09); --text: #f3f3fa; --muted: #9b9bb8; --a1: #7c3aed; --a2: #ec4899; --ok: #22c55e; --bad: #f87171; --grad: linear-gradient(135deg, #7c3aed, #ec4899 60%, #f97316); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; }
+    body { border: 1px solid var(--line); border-radius: 0; display: flex; flex-direction: column; }
+    .bar { -webkit-app-region: drag; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: #11111b; }
+    .bar b { font-size: 13px; letter-spacing: .2px; }
+    .logo { width: 22px; height: 22px; border-radius: 7px; background: var(--grad); display: grid; place-items: center; font-size: 11px; }
+    .grow { flex: 1; }
+    button { -webkit-app-region: no-drag; font: inherit; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; cursor: pointer; }
+    button:hover { border-color: rgba(255,255,255,.25); }
+    button.primary { background: var(--grad); border: 0; font-weight: 600; }
+    button.big { padding: 12px 20px; font-size: 15px; }
+    button.x { padding: 2px 9px; background: none; border: 0; color: var(--muted); font-size: 16px; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .main { padding: 16px 20px; overflow-y: auto; flex: 1; }
+    h1 { font-size: 20px; margin: 4px 0 4px; }
+    h2 { font-size: 14px; margin: 16px 0 8px; color: #c4b5fd; text-transform: uppercase; letter-spacing: .6px; }
+    p { margin: 6px 0; }
+    .muted { color: var(--muted); }
+    .tiny { font-size: 12px; }
+    .opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; margin: 6px 0; cursor: pointer; background: rgba(255,255,255,.02); }
+    .opt:has(input:checked) { border-color: var(--a2); background: rgba(236,72,153,.08); }
+    .opt input { margin-top: 3px; accent-color: var(--a2); width: 16px; height: 16px; flex: none; }
+    .opt small { display: block; color: var(--muted); font-size: 11.5px; }
+    .check { display: flex; gap: 10px; align-items: flex-start; margin: 7px 0; cursor: pointer; }
+    .check input { margin-top: 3px; accent-color: var(--ok); width: 16px; height: 16px; flex: none; }
+    .foot { display: flex; gap: 10px; align-items: center; padding: 12px 20px; border-top: 1px solid var(--line); background: #11111b; }
+    .ok { color: var(--ok); } .bad { color: var(--bad); }
+    .chip { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 99px; background: rgba(124,58,237,.25); color: #ddd6fe; margin: 2px 4px 0 0; font-family: Consolas, monospace; }
+    /* Panel de grabación */
+    .rec { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 12px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; animation: blink 1.2s infinite; }
+    @keyframes blink { 50% { opacity: .25; } }
+    .step-n { font-size: 12px; color: var(--muted); }
+    .todo { font-size: 15px; font-weight: 600; margin: 4px 0 6px; }
+    .en { font-size: 11.5px; color: var(--muted); font-style: italic; margin-top: 6px; border-left: 2px solid rgba(196,181,253,.5); padding-left: 8px; }
+    .count { font-size: 64px; font-weight: 800; text-align: center; margin: 18px 0 6px; background: var(--grad); -webkit-background-clip: text; color: transparent; }
+    .progress { height: 10px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; margin: 14px 0; }
+    .progress span { display: block; height: 100%; background: var(--grad); transition: width .4s ease; }
+    .path { font-family: Consolas, monospace; font-size: 12px; word-break: break-all; color: #ddd6fe; }
+    .err { white-space: pre-wrap; color: #fecaca; font-size: 12.5px; background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.25); border-radius: 10px; padding: 10px; }
+    ol { margin: 6px 0; padding-left: 20px; } li { margin: 3px 0; }
+  </style>
+</head>
+<body>
+  <div class="bar"><span class="logo">▶</span><b id="title">ClipViral · Video para Meta</b><span class="grow"></span><button class="x" id="close" title="Cerrar">✕</button></div>
+  <div id="view" class="main"></div>
+  <div id="foot" class="foot"></div>
+  <script src="panel.js"></script>
+</body>
+</html>

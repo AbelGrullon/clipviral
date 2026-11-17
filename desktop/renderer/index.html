@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: https:; media-src 'self' file:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'" />
+  <title>ClipViral</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg" aria-hidden="true">
+    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+    <div class="bg-grid"></div><div class="bg-scan"></div><div class="bg-air"></div>
+  </div>
+  <div class="titlebar"><div class="titlebar-brand"><span class="logo-mini">▶</span> ClipViral</div></div>
+
+  <!-- Pantalla de carga -->
+  <section id="splash" class="splash">
+    <div class="splash-logo"><span>▶</span></div>
+    <div class="splash-text">ClipViral</div>
+    <div class="splash-bar"><span></span></div>
+  </section>
+
+  <!-- Entrar / Registrarse -->
+  <!-- Versión para clientes: activar con una clave (30 días por clave) -->
+  <section id="activar" class="auth activar hidden">
+    <div class="auth-hero">
+      <h1 id="actTitle">Activa ClipViral</h1>
+      <p class="muted" id="actWhy">Para usar ClipViral necesitas una clave de activación. Cada clave da 30 días.</p>
+      <ol class="act-steps">
+        <li><b>Copia el código de esta PC</b> y mándaselo a quien te vendió ClipViral.</li>
+        <li><b>Te devuelve una clave</b> hecha para esta PC, con tu plan: Local o Claude.</li>
+        <li><b>Pégala aquí</b> y toca Activar. Cuando falten pocos días, pide la siguiente: los días se suman.</li>
+      </ol>
+      <div class="act-buy">
+        <p class="muted">¿Todavía no tienes una suscripción? Local $20 o Claude $30 al mes.</p>
+        <button class="btn primary" type="button" id="actBuy"><span>💬 Comprar por WhatsApp</span></button>
+        <button class="btn ghost" type="button" data-soporte><span>Necesito ayuda</span></button>
+      </div>
+    </div>
+    <div class="auth-panel">
+      <div class="auth-card card">
+        <span class="act-label">Código de esta PC</span>
+        <div class="act-code"><b id="actMachine">····-····</b><button class="btn small" type="button" id="actCopy">Copiar código</button></div>
+        <form id="actForm" class="auth-form">
+          <label><span>Clave de activación</span>
+            <textarea id="actKey" rows="4" spellcheck="false" autocomplete="off" placeholder="Pega aquí la clave que te enviaron"></textarea></label>
+          <button class="link-btn" type="button" id="actPaste">Pegar desde el portapapeles</button>
+          <label class="check"><input type="checkbox" id="actTerms" required />
+            <span>Acepto los términos de uso y confirmo que tengo permiso de los creadores para usar su contenido.</span></label>
+          <button class="btn primary wide" type="submit"><span>Activar</span></button>
+        </form>
+        <p id="actError" class="error"></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="auth" class="auth hidden">
+    <div class="auth-hero">
+      <h1 data-en="Turn your live streams into &lt;span class=&quot;grad-text&quot;&gt;viral clips&lt;/span&gt;">Convierte directos en <span class="grad-text">clips virales</span></h1>
+      <p class="muted" data-en="Paste the link, press start and ClipViral finds the best moments of your own streams and videos, adds captions and gets them ready to post.">Pega el enlace, presiona iniciar y deja que ClipViral encuentre los mejores momentos, les ponga subtítulos y los guarde listos para subir.</p>
+      <ul class="feature-list">
+        <li data-en="&lt;span&gt;⚡&lt;/span&gt; Finds the best moments with chat, audio and AI"><span>⚡</span> Detecta momentos con el chat, el audio y la IA</li>
+        <li data-en="&lt;span&gt;💬&lt;/span&gt; Animated captions"><span>💬</span> Subtítulos animados estilo TikTok</li>
+        <li data-en="&lt;span&gt;📱&lt;/span&gt; Vertical format for Shorts, Reels and TikTok"><span>📱</span> Formato vertical para Shorts, Reels y TikTok</li>
+        <li data-en="&lt;span&gt;🔒&lt;/span&gt; Everything stays on your PC"><span>🔒</span> Todo se guarda en tu PC</li>
+      </ul>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="phone-video"></div>
+          <div class="phone-subs"><span>ESTO</span> <span>FUE</span> <span>INCREÍBLE</span></div>
+          <div class="phone-heart">❤</div>
+        </div>
+      </div>
+    </div>
+    <div class="auth-panel">
+      <div class="auth-card card">
+        <div class="auth-tabs">
+          <button data-auth="login" class="active" data-en="Sign in">Entrar</button>
+          <button data-auth="register" data-en="Create account">Crear cuenta</button>
+          <span class="auth-tab-pill"></span>
+        </div>
+        <form id="loginForm" class="auth-form">
+          <label><span data-en="Email">Correo</span><input name="email" type="email" autocomplete="username" required /></label>
+          <label><span data-en="Password">Contraseña</span><input name="password" type="password" autocomplete="current-password" required /></label>
+          <button class="btn primary wide" type="submit"><span data-en="Sign in">Entrar</span></button>
+          <button class="link-btn center" type="button" id="forgotBtn" data-en="Forgot your password?">¿Olvidaste tu contraseña?</button>
+        </form>
+        <form id="registerForm" class="auth-form hidden">
+          <label><span data-en="Name">Nombre</span><input name="name" required minlength="2" /></label>
+          <label><span data-en="Email">Correo</span><input name="email" type="email" required /></label>
+          <label><span data-en="Password">Contraseña</span><input name="password" type="password" minlength="8" required placeholder="Mínimo 8 caracteres" data-en-ph="At least 8 characters" /></label>
+          <label class="check"><input type="checkbox" name="acceptTerms" required />
+            <span data-en="I accept the terms of use and confirm I have the creators' permission to use their content.">Acepto los términos de uso y confirmo que tengo permiso de los creadores para usar su contenido.</span></label>
+          <button class="btn primary wide" type="submit"><span data-en="Create free account">Crear cuenta gratis</span></button>
+          <p class="muted tiny center" data-en="Includes free trial days.">Incluye días de prueba gratis.</p>
+        </form>
+        <p id="authError" class="error"></p>
+        <button class="link-btn center" type="button" data-soporte>¿Necesitas ayuda? Escríbenos por WhatsApp</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- App -->
+  <section id="main" class="main hidden">
+    <aside class="sidebar">
+      <button id="navToggle" class="nav-toggle" type="button" aria-expanded="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h16"/><path d="m19 9-3 3 3 3"/></svg><span class="nav-label" data-en="Hide menu">Ocultar menú</span></button>
+      <nav id="nav" class="nav">
+        <span class="nav-pill"></span>
+      </nav>
+      <button id="supportBtn" class="nav-support" type="button" title="Soporte por WhatsApp">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-13.4 7.8L3 21l1.2-4.6A9 9 0 1 1 21 12z"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg>
+        <span class="nav-label">Soporte</span>
+      </button>
+      <div id="userCard" class="user-card"></div>
+    </aside>
+    <div class="content">
+      <div id="announce" class="announce hidden"></div>
+      <div id="page" class="page"></div>
+    </div>
+  </section>
+
+  <div id="modalRoot"></div>
+  <div id="toasts" class="toasts"></div>
+  <canvas id="confetti" class="confetti"></canvas>
+  <script src="app.js"></script>
+  <script src="pc.js"></script>
+  <script src="extras.js"></script>
+  <script src="crecer.js"></script>
+  <script src="sugeridos.js"></script>
+  <script src="tiktok.js"></script>
+  <script src="agente.js"></script>
+</body>
+</html>

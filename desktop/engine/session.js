@@ -1,0 +1,500 @@
+// Une todo: graba el directo, lo transcribe, busca momentos virales y crea los clips.
+const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const path = require('node:path');
+const { run, slug, fmtClock, youtubeId } = require('./util');
+const os = require('node:os');
+const { Recorder } = require('./recorder');
+const { VodSource } = require('./vod');
+const { ChatWatcher } = require('./chat');
+const { Timeline } = require('./detector');
+const { transcribeSegment } = require('./transcribe');
+const { makeClip } = require('./clipper');
+const localAi = require('./localai');
+const vista = require('./vista');
+const { merge: mergeSounds, describe: describeSound } = require('./sonido');
+const { judge } = require('./juez');
+const { SENSITIVITY } = require('./detector');
+
+// El video ya no se puede ver (privado, borrado o bloqueado): actualizar yt-dlp no sirve.
+const GONE = /private video|video unavailable|has been removed|not available in your country|members-only/i;
+
+/** Por qué yt-dlp no pudo abrir el enlace, en palabras simples (con el motivo real al final). */
+function ytdlpProblem(err) {
+  const text = `${err?.err || ''}\n${err?.message || ''}`;
+  const line = (text.match(/ERROR:[^\n]*/g) || []).pop()?.replace(/^ERROR:\s*(\[[^\]]*\]\s*)?([\w-]{11}:\s*)?/, '').trim().slice(0, 220) || '';
+  if (GONE.test(text)) return 'Ese video no está disponible (puede ser privado o ya no existe).';
+  if (/could not (copy|find).*cookie|failed to decrypt|DPAPI|cookies database|could not open.*cookie/i.test(text)) {
+    return 'No pude leer las cookies del navegador (Chrome y Edge las bloquean mientras están abiertos). Cierra ese navegador del todo o, mejor, usa un archivo cookies.txt en Ajustes → Cookies de YouTube.';
+  }
+  if (/sign in to confirm|not a bot/i.test(text)) return `YouTube pidió confirmar que no eres un robot. Para arreglarlo ve a Ajustes → Cookies de YouTube y conecta tu sesión de YouTube (un archivo cookies.txt). (${line})`;
+  if (/netscape format|invalid length|does not look like a Netscape/i.test(text)) return 'El archivo de cookies no sirve. Expórtalo otra vez desde youtube.com (Ajustes → Cookies de YouTube).';
+  if (/age|inappropriate/i.test(text) && /sign in/i.test(text)) return 'Ese video tiene restricción de edad: YouTube no deja leerlo sin iniciar sesión.';
+  if (/ENOENT|no se encontr|not recognized/i.test(text)) return 'Falta yt-dlp. Instálalo en Ajustes → Estado del sistema.';
+  if (/getaddrinfo|timed out|Unable to download|network/i.test(text)) return 'No pude conectarme con YouTube. Revisa tu internet y prueba otra vez.';
+  return `No pude abrir ese enlace de YouTube${line ? `: ${line}` : '.'}`;
+}
+
+const AI_WINDOW = 600;     // la IA Pro revisa tramos de 10 minutos
+const AI_MIN_SCORE = 7;    // nota mínima de Haiku para pasar a Sonnet
+
+class ClipSession extends EventEmitter {
+  /**
+   * opts: url, mode ('local'|'ia'), clipSeconds, style, subtitles, look (estilo), sensitivity, maxPerHour,
+   *       outputDir, workRoot, paths (componentes), whisperModel, language, whisperGpu, gpuEncode,
+   *       ollamaModel, api (llamadas al servidor), origin (piloto/manual), hints (lo que mejor funciona en tus redes)
+   *       oido (detector de sonidos ya creado, o null), visionModel (modelo de Ollama que mira el video, o '')
+   */
+  constructor(opts) {
+    super();
+    this.o = { clipSeconds: 45, style: 'blur', subtitles: true, subColor: 'amarillo', sensitivity: 'media', maxPerHour: 8, ...opts };
+    this.mode = this.o.mode;
+    this.timeline = new Timeline();
+    this.clips = [];
+    this.queue = Promise.resolve();
+    this.state = 'starting';
+    this.localFrom = 0;
+    this.lastPeakT = -Infinity;
+    this.aiWindowStart = 0;
+    this.aiSecondsUsed = null;
+    this.whisperGpu = this.o.whisperGpu;
+    this.chatCount = 0;
+  }
+
+  log(text, kind = 'info') { this.emit('log', { text, kind, at: Date.now() }); }
+
+  stats() {
+    const live = this.info?.isLive && this.recorder?.startedAt && this.state === 'recording'
+      ? (Date.now() - this.recorder.startedAt) / 1000 : this.recorder?.offset || 0;
+    return {
+      state: this.state,
+      mode: this.mode,
+      info: this.info || null,
+      recorded: Math.max(live, this.recorder?.offset || 0),
+      analyzed: this.timeline.until,
+      chatMessages: this.chatCount,
+      clips: this.clips.length,
+      aiSecondsUsed: this.aiSecondsUsed,
+    };
+  }
+
+  emitStats() { this.emit('stats', this.stats()); }
+
+  async start() {
+    const { paths } = this.o;
+    const ytdlpArgs = paths.ytdlpArgs?.() || [];
+    this.log('Abriendo el enlace…');
+    let meta;
+    const read = async () => {
+      const { out } = await run(paths.ytdlp, [...ytdlpArgs, '--dump-single-json', '--no-warnings', '--skip-download', '--no-playlist', this.o.url], { timeoutMs: 90000 });
+      return JSON.parse(out);
+    };
+    try {
+      meta = await read();
+    } catch (first) {
+      // YouTube cambia seguido y un yt-dlp viejo deja de leer los videos: se actualiza y se prueba otra vez.
+      let err = first;
+      if (this.o.updateYtdlp && !GONE.test(`${err.err || ''} ${err.message}`)) {
+        this.log('No pude abrir el enlace. Actualizo yt-dlp y pruebo otra vez…');
+        await this.o.updateYtdlp().catch(() => {});
+        try { meta = await read(); } catch (again) { err = again; }
+      }
+      if (!meta) throw new Error(ytdlpProblem(err));
+    }
+    if (this.stopRequested) return;
+    if (meta.is_upcoming || meta.live_status === 'is_upcoming') throw new Error('Ese directo todavía no ha empezado.');
+
+    this.info = {
+      id: meta.id || youtubeId(this.o.url) || 'video',
+      title: meta.title || 'Directo',
+      channel: meta.channel || meta.uploader || '',
+      isLive: !!meta.is_live,
+      duration: meta.duration || null,
+      thumbnail: meta.thumbnail || null,
+      url: this.o.url,
+    };
+    const stamp = new Date();
+    const day = stamp.toISOString().slice(0, 10);
+    this.outDir = path.join(this.o.outputDir, day, `${slug(this.info.channel || 'canal', 30)}_${slug(this.info.title, 40)}`);
+    this.workDir = path.join(this.o.workRoot, `${this.info.id}-${stamp.getTime()}`);
+    fs.mkdirSync(this.outDir, { recursive: true });
+    fs.mkdirSync(this.workDir, { recursive: true });
+
+    this.log(`${this.info.isLive ? 'Directo en vivo' : 'Video'}: ${this.info.title}`, 'ok');
+
+    if (this.info.isLive) {
+      this.chat = new ChatWatcher(this.info.id);
+      this.chat.on('message', (m) => {
+        this.chatCount += 1;
+        if (!this.recorder?.startedAt) return;
+        this.timeline.addChat((m.wall - this.recorder.startedAt) / 1000, m.text);
+      });
+      this.chat.on('warn', (w) => this.log(w, 'warn'));
+      this.chat.start().then((ok) => ok && this.log('Leyendo el chat en vivo', 'ok'));
+    }
+
+    const src = { ytdlp: paths.ytdlp, ytdlpArgs, ffmpeg: paths.ffmpeg, ffprobe: paths.ffprobe, url: this.o.url, dir: path.join(this.workDir, 'video') };
+    // Video ya subido: se baja rápido (audio primero) en vez de leerlo en tiempo real como un directo.
+    this.recorder = this.info.isLive ? new Recorder({ ...src, isLive: true }) : new VodSource(src);
+    // Varios pedazos se pasan a texto a la vez; el análisis sigue el orden del video.
+    this.parallel = this.info.isLive ? 1 : (this.whisperGpu ? 2 : os.cpus().length >= 12 ? 2 : 1);
+    this.recorder.on('segment', (seg) => {
+      // Video ya subido + "Detener": los pedazos que todavía no se empezaron se saltan (en un directo se analiza todo lo grabado).
+      const text = this.#limit(() => (this.stopRequested && !this.info.isLive ? Promise.resolve(null) : this.#transcribe(seg)));
+      text.catch(() => {});
+      this.queue = this.queue.then(() => this.#handleSegment(seg, text)).catch((e) => this.log(e.message, 'error'));
+    });
+    this.recorder.on('warn', (w) => this.log(w, 'warn'));
+    this.recorder.on('info', (w) => this.log(w));
+    this.recorder.on('end', ({ reason }) => this.#finish(reason));
+    this.recorder.start();
+    // La IA que mira el video se carga mientras se graba el primer pedazo (si no, el primer momento se queda sin ella).
+    if (this.o.visionModel) {
+      vista.warmUp(this.o.visionModel).then((ok) => ok && this.log('La IA que mira el video ya está lista', 'ok'));
+    }
+    this.state = 'recording';
+    this.log(this.info.isLive ? 'Grabando… el primer análisis sale en unos 2 minutos.' : 'Descargando y analizando el video…');
+    this.emitStats();
+    this.ticker = setInterval(() => this.emitStats(), 1000);
+  }
+
+  /** Deja correr como máximo `this.parallel` transcripciones a la vez. */
+  #limit(fn) {
+    this.running = this.running || 0;
+    this.waiting = this.waiting || [];
+    return new Promise((resolve, reject) => {
+      const go = () => {
+        this.running += 1;
+        fn().then(resolve, reject).finally(() => { this.running -= 1; this.waiting.shift()?.(); });
+      };
+      if (this.running < (this.parallel || 1)) go(); else this.waiting.push(go);
+    });
+  }
+
+  async #transcribe(seg) {
+    const { paths } = this.o;
+    this.log(`Pasando a texto ${fmtClock(seg.start)} – ${fmtClock(seg.start + seg.duration)}`);
+    // Si corren varias a la vez, se reparten los núcleos del procesador.
+    const threads = Math.max(2, Math.min(8, Math.floor((os.cpus().length - 1) / (this.parallel || 1))));
+    const opts = { ffmpeg: paths.ffmpeg, whisper: paths.whisper, model: paths.model(this.o.whisperModel), language: this.o.language || 'auto', threads };
+    try {
+      return await transcribeSegment({ ...opts, useGpu: this.whisperGpu }, seg.file, this.workDir);
+    } catch (err) {
+      if (!this.whisperGpu) throw new Error(`Whisper falló: ${err.message.slice(0, 200)}`);
+      if (!this.gpuWarned) { this.gpuWarned = true; this.log('La tarjeta de video no funcionó con Whisper. Sigo con el procesador.', 'warn'); }
+      this.whisperGpu = false;
+      return transcribeSegment({ ...opts, useGpu: false }, seg.file, this.workDir);
+    }
+  }
+
+  async #handleSegment(seg, text) {
+    const result = await text;
+    if (!result) return; // se saltó porque el usuario tocó "Detener"
+    this.timeline.addSegment(seg.start, seg.duration, result.words, result.loudness);
+    await this.#listen(seg);
+
+    const activity = this.timeline.scores(seg.start, seg.start + seg.duration);
+    const points = [];
+    for (let i = 0; i < activity.length; i += 5) points.push({ t: activity[i].t, score: +activity[i].score.toFixed(2) });
+    this.emit('activity', points);
+    this.emitStats();
+
+    if (this.mode === 'ia') {
+      if (this.timeline.until - this.aiWindowStart >= AI_WINDOW) await this.#analyzeAi(false);
+    } else {
+      await this.#analyzeLocal(false);
+    }
+    this.#cleanup();
+  }
+
+  /** El detector de sonidos escucha el pedazo (risas, gritos, aplausos…). Si falla, se sigue sin él. */
+  async #listen(seg) {
+    if (!this.o.oido || this.oidoOff || this.stopRequested) return;
+    try {
+      const windows = await this.o.oido.listenFile(this.o.paths.ffmpeg, seg.file, { shouldStop: () => this.stopRequested });
+      this.timeline.addSound(seg.start, windows);
+      const loud = windows.filter((w) => describeSound(w.cats));
+      if (loud.length) this.log(`👂 Se oyen ${[...new Set(loud.map((w) => describeSound(w.cats)))].slice(0, 3).join('; ')} (${fmtClock(seg.start + loud[0].t)})`);
+    } catch (err) {
+      this.oidoOff = true;
+      this.log(`El detector de sonidos no funcionó (${String(err.message).slice(0, 160)}). Sigo sin él.`, 'warn');
+    }
+  }
+
+  #cleanup() {
+    const keepFrom = this.mode === 'ia' ? this.aiWindowStart - 180 : this.localFrom - this.o.clipSeconds * 2;
+    if (keepFrom > 0) {
+      this.recorder.cleanup(keepFrom);
+      this.timeline.trim(keepFrom - 120);
+    }
+  }
+
+  #overlaps(start, end) {
+    return this.clips.some((c) => {
+      const inter = Math.min(end, c.end) - Math.max(start, c.start);
+      return inter > 0.4 * Math.min(end - start, c.end - c.start);
+    });
+  }
+
+  #clipsLastHour(at) {
+    return this.clips.filter((c) => at - c.start < 3600).length;
+  }
+
+  // ---------- Modo Local ----------
+  async #analyzeLocal(final) {
+    const L = this.o.clipSeconds;
+    const horizon = final ? this.timeline.until : this.timeline.until - L;
+    if (horizon <= this.localFrom) return;
+    const peaks = this.timeline.findPeaks(Math.max(0, this.localFrom - L), horizon, { clipSeconds: L, sensitivity: this.o.sensitivity });
+    this.localFrom = horizon;
+    let ollama = null;
+    let eyes = null;
+    if (peaks.length && (this.o.ollamaModel || this.o.visionModel)) {
+      const st = await localAi.status();
+      const has = (id) => !!id && st.running && st.models.some((m) => m === id || m.startsWith(`${id}`));
+      ollama = has(this.o.ollamaModel) ? this.o.ollamaModel : null;
+      eyes = has(this.o.visionModel) ? this.o.visionModel : null;
+      if (this.o.visionModel && !eyes && !this.eyesWarned) {
+        this.eyesWarned = true;
+        this.log(st.running ? `El modelo que mira el video (${this.o.visionModel}) no está descargado. Sigo sin él.` : 'Ollama está apagado: sigo sin mirar el video.', 'warn');
+      }
+    }
+    const threshold = SENSITIVITY[this.o.sensitivity] ?? SENSITIVITY.media;
+    for (const peak of peaks) {
+      if (peak.t - this.lastPeakT < L) continue;
+      this.lastPeakT = peak.t;
+      if (this.#clipsLastHour(peak.t) >= this.o.maxPerHour) continue;
+      const { start, end } = this.timeline.snap(peak.t - 0.6 * L, peak.t + 0.4 * L);
+      if (this.#overlaps(start, end)) continue;
+      const words = this.timeline.wordsBetween(start, end);
+      const heard = this.timeline.soundBetween(start, end);
+      const sound = heard.length ? { cats: mergeSounds(heard.map((w) => w.cats)), score: Math.max(...heard.map((w) => w.score)) } : null;
+      // Sin voz solo vale si se oye algo fuerte (risas, gritos, aplausos…).
+      if (words.length < 4 && !(sound && describeSound(sound.cats))) continue;
+      const transcript = this.timeline.lines(start, end).map((l) => `[${l.t}] ${l.text}`).join('\n');
+      const chatSummary = this.timeline.chatSummary(start, end);
+
+      let vision = null;
+      if (eyes) {
+        try {
+          this.log(`👀 La IA está mirando el momento ${fmtClock(start)}…`);
+          const segments = this.recorder.videoSegmentsFor ? await this.#waitVideo(start, end) : this.recorder.segmentsFor(start, end).filter((x) => !x.deleted);
+          const frames = await vista.grabFrames({
+            ffmpeg: this.o.paths.ffmpeg, segments, times: vista.frameTimes(start, end, peak.t), tempDir: path.join(this.workDir, 'fotos'),
+          });
+          if (frames.length) {
+            vision = await vista.reviewMoment(eyes, {
+              streamTitle: this.info.title, transcript, chatSummary, frames, start, sounds: sound ? describeSound(sound.cats) : '',
+            });
+          }
+        } catch (err) {
+          if (err.message === 'detenido') return;
+          this.log(`La IA que mira el video no respondió (${String(err.message).slice(0, 160)}). Sigo sin ella en este momento.`, 'warn');
+        }
+      }
+
+      const verdict = judge({ peak, sound, vision, threshold, sensitivity: this.o.sensitivity });
+      if (!verdict.keep) {
+        const what = vision ? ` La IA le dio ${vision.viral}/10${vision.que_pasa ? ` (${vision.que_pasa})` : ''}.` : '';
+        this.log(`Momento ${fmtClock(start)} descartado: coinciden ${verdict.votes} de ${verdict.available} señales (hacen falta ${verdict.needed}).${what}`);
+        continue;
+      }
+
+      let meta = { title: autoTitle(words.length ? words : [{ w: this.info.title || 'Momento' }]), hashtags: defaultTags(this.info), description: '', score: verdict.score };
+      if (vision) {
+        meta = { title: vision.title || meta.title, hashtags: vision.hashtags.length ? vision.hashtags : meta.hashtags, description: vision.description, score: verdict.score };
+      } else if (ollama) {
+        try {
+          this.log(`IA local revisando el momento ${fmtClock(start)}…`);
+          const soundNote = sound && describeSound(sound.cats) ? ` Se oyen ${describeSound(sound.cats)}.` : '';
+          const r = await localAi.review(ollama, { streamTitle: this.info.title, transcript, chatSummary: `${chatSummary}${soundNote}` });
+          if (r.viral < 5) { this.log(`Momento ${fmtClock(start)} descartado por la IA local (nota ${r.viral})`); continue; }
+          meta = { title: r.title || meta.title, hashtags: r.hashtags.length ? r.hashtags : meta.hashtags, description: r.description, score: Math.round((r.viral + verdict.score) / 2) };
+        } catch (err) {
+          this.log(`IA local no respondió (${err.message}). Uso título automático.`, 'warn');
+        }
+      }
+      await this.#produce({ start, end, ...meta, reason: verdict.reason });
+    }
+  }
+
+  // ---------- Modo IA Pro (Claude) ----------
+  async #analyzeAi(final) {
+    const from = this.aiWindowStart;
+    const to = this.timeline.until;
+    if (to - from < (final ? 15 : AI_WINDOW)) return;
+    const L = this.o.clipSeconds;
+    const ctxStart = Math.max(0, from - 60);
+    this.log(`Claude está revisando ${fmtClock(from)} – ${fmtClock(to)}…`);
+    let scan;
+    try {
+      scan = await this.o.api('/ai/scan', {
+        title: this.info.title,
+        windowStart: ctxStart,
+        windowSeconds: Math.round(to - from),
+        clipSeconds: L,
+        transcript: this.timeline.lines(ctxStart, to),
+        chat: this.timeline.chatBins(ctxStart, to),
+        peaks: this.timeline.findPeaks(ctxStart, to, { clipSeconds: L, sensitivity: 'alta' }).sort((a, b) => b.score - a.score).slice(0, 10),
+      });
+    } catch (err) {
+      if (err.status === 402 || err.status === 503 || err.status === 401) {
+        this.log(`${err.message} Sigo en modo Local.`, 'warn');
+        this.mode = 'local';
+        this.localFrom = from;
+        this.emit('mode', 'local');
+        return this.#analyzeLocal(final);
+      }
+      this.log(`${err.message}`, 'warn');
+      if (to - from > 1500 || final) this.aiWindowStart = to; // no dejamos que el tramo crezca sin fin
+      return;
+    }
+    this.aiWindowStart = to;
+    if (typeof scan.secondsUsed === 'number') this.aiSecondsUsed = scan.secondsUsed;
+
+    const good = scan.candidates
+      .filter((c) => c.score >= AI_MIN_SCORE && c.end > c.start && !this.#overlaps(c.start, c.end))
+      .slice(0, 8);
+    if (!good.length) { this.log(`Nada viral entre ${fmtClock(from)} y ${fmtClock(to)}`); return; }
+
+    this.log(`Claude encontró ${good.length} posible${good.length > 1 ? 's' : ''}. Eligiendo los mejores…`);
+    let picked;
+    try {
+      picked = await this.o.api('/ai/pick', {
+        title: this.info.title,
+        clipSeconds: L,
+        maxClips: Math.max(1, Math.min(4, this.o.maxPerHour)),
+        hints: this.o.hints || '',
+        candidates: good.map((c, i) => ({
+          id: String(i + 1), start: c.start, end: c.end, score: c.score, reason: c.reason,
+          transcript: this.timeline.lines(c.start - 10, c.end + 10),
+          chatSummary: this.timeline.chatSummary(c.start, c.end),
+        })),
+      });
+    } catch (err) {
+      this.log(`${err.message}`, 'warn');
+      return;
+    }
+    for (const c of picked.clips) {
+      let start = Math.max(ctxStart - 30, c.start);
+      let end = Math.min(this.timeline.until, c.end);
+      if (end - start < 12) end = Math.min(this.timeline.until, start + 12);
+      if (end - start > 120) end = start + 120;
+      ({ start, end } = this.timeline.snap(start, end));
+      if (this.#overlaps(start, end)) continue;
+      // Por qué funcionaría: lo que dice Sonnet (o, si no, lo que marcó Haiku). redes: el texto listo de cada red.
+      const reason = c.reason || good[Number(c.id) - 1]?.reason || 'Elegido por Claude';
+      await this.#produce({ start, end, title: c.title, hashtags: c.hashtags, description: c.description, score: c.score, reason, redes: c.redes || null });
+    }
+  }
+
+  async #produce({ start, end, title, hashtags, description, score, reason, redes = null }) {
+    const n = this.clips.length + 1;
+    const name = `${String(n).padStart(3, '0')}_${slug(title, 45)}`;
+    const outFile = path.join(this.outDir, `${name}.mp4`);
+    this.log(`✂️ Creando clip ${n}: "${title}"`);
+    this.emit('producing', { title, start, end });
+    try {
+      const result = await makeClip({
+        ffmpeg: this.o.paths.ffmpeg,
+        segments: this.recorder.videoSegmentsFor
+          ? await this.#waitVideo(start, end)
+          : this.recorder.segmentsFor(start, end).filter((s) => !s.deleted),
+        clip: { start, end, title, words: this.timeline.wordsBetween(start, end) },
+        outFile,
+        style: this.o.style,
+        subtitles: this.o.subtitles,
+        look: this.o.look || { subs: { color: this.o.subColor } },
+        gpuEncode: this.o.gpuEncode,
+        tempDir: path.join(this.workDir, `clip-${n}`),
+      });
+      const tags = (hashtags || []).map((h) => (h.startsWith('#') ? h : `#${h}`).replace(/\s+/g, ''));
+      fs.writeFileSync(path.join(this.outDir, `${name}.txt`),
+        `${title}\n\n${description ? `${description}\n\n` : ''}${tags.join(' ')}\n\nFuente: ${this.info.channel} — ${this.info.url} (minuto ${fmtClock(start)})\n`);
+      const entry = {
+        id: `${this.info.id}-${Date.now()}-${n}`,
+        file: result.file,
+        thumb: result.thumb,
+        title, description: description || '', hashtags: tags, score, reason,
+        // Texto de cada red escrito por Claude (en modo Local no hay: Clips sugeridos usa la plantilla).
+        redes,
+        start, end, duration: result.duration,
+        stream: { id: this.info.id, title: this.info.title, channel: this.info.channel, url: this.info.url },
+        mode: this.mode,
+        // De dónde salió: a mano, o el piloto (y por qué canal o tema). Sirve para saber qué funciona.
+        origin: this.o.origin ? { type: this.o.origin.type, source: this.o.origin.source || null, kind: this.o.origin.kind || null } : { type: 'manual' },
+        createdAt: new Date().toISOString(),
+      };
+      this.clips.push(entry);
+      this.emit('clip', entry);
+      this.log(`✅ Clip listo: ${title}`, 'ok');
+      this.emitStats();
+    } catch (err) {
+      this.log(err.message === 'detenido'
+        ? `No se pudo crear el clip "${title}": se canceló la descarga del video.`
+        : `No se pudo crear el clip: ${err.message.slice(0, 300)}`, 'error');
+    }
+  }
+
+  async #waitVideo(start, end) {
+    if (!this.recorder.videoFile) {
+      const pct = Math.floor((this.recorder.progress?.video || 0) * 100);
+      this.log(`Esperando que termine de bajar el video (va en ${pct}%) para cortar ${fmtClock(start)} – ${fmtClock(end)}…`);
+    }
+    return this.recorder.videoSegmentsFor(start, end);
+  }
+
+  async #finish(reason) {
+    if (this.finishing) return;
+    this.finishing = true;
+    this.state = 'finishing';
+    this.emitStats();
+    this.chat?.stop();
+    if (!this.stopRequested) this.log(this.info?.isLive ? `El directo terminó (${reason}).` : 'Audio completo listo para analizar.', 'ok');
+    this.log('Terminando de analizar lo que falta…');
+    await this.queue.catch(() => {});
+    try {
+      if (this.mode === 'ia') await this.#analyzeAi(true);
+      if (this.mode === 'local') await this.#analyzeLocal(true);
+    } catch (err) {
+      this.log(err.message, 'error');
+    }
+    clearInterval(this.ticker);
+    this.state = 'done';
+    this.recorder?.abort?.(); // si el video seguía bajando y ningún clip lo necesita, se cancela
+    if (this.workDir) { try { fs.rmSync(this.workDir, { recursive: true, force: true }); } catch {} }
+    this.log(`Listo. ${this.clips.length} clip${this.clips.length === 1 ? '' : 's'} guardado${this.clips.length === 1 ? '' : 's'}.`, 'ok');
+    this.emitStats();
+    this.emit('done', { clips: this.clips.length, outDir: this.outDir });
+  }
+
+  /**
+   * "Detener": no se analiza más y se crean los clips de lo ya revisado.
+   * now: cancelar todo ya, sin esperar el video (al cerrar la app).
+   */
+  stop({ now = false } = {}) {
+    if (now) this.recorder?.abort?.();
+    if (this.stopRequested) return;
+    this.stopRequested = true;
+    this.log(this.info && !this.info.isLive && !now
+      ? 'Deteniendo: ya no reviso más partes del video. Creo los clips de lo que ya revisé (si el video todavía se está bajando, espero a que termine).'
+      : 'Deteniendo…');
+    if (this.recorder) this.recorder.stop();
+    else this.#finish('detenido');
+  }
+}
+
+function autoTitle(words) {
+  const text = words.map((w) => w.w).join(' ').replace(/\s+([.,!?])/g, '$1').trim();
+  const firstSentence = text.split(/(?<=[.!?¡¿])\s/)[0] || text;
+  const short = firstSentence.split(' ').slice(0, 9).join(' ');
+  const title = short.length < firstSentence.length ? `${short}…` : short;
+  return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
+function defaultTags(info) {
+  const channel = slug(info?.channel || '', 25).replace(/-/g, '');
+  return ['#clips', '#viral', '#stream', ...(channel ? [`#${channel}`] : [])];
+}
+
+module.exports = { ClipSession, autoTitle, ytdlpProblem };

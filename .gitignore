@@ -1,0 +1,31 @@
+node_modules/
+data/
+dist/
+.env
+*.log
+captura.png
+clips-de-prueba/
+Videos para Meta/
+https/
+traer-datos/
+# Nunca subir datos ni secretos
+.claude/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+secret.key
+*.key
+*.pem
+sesion.json
+ajustes.json
+*cookies*.txt
+.env.*
+!.env.example
+*.zip
+*.mp4
+*.mov
+*.mkv
+dist-*/
+*.exe
+*.blockmap

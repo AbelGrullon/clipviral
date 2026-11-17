@@ -1,0 +1,54 @@
+CLIPVIRAL - CÓMO EMPEZAR
+========================
+
+ClipViral saca clips virales de directos y videos de YouTube, con subtítulos.
+Todo funciona en tu PC, con tu propia cuenta.
+
+ANTES DE EMPEZAR (solo una vez)
+  1. Windows 10 u 11 e internet.
+  2. Node.js 22 o más nuevo: https://nodejs.org (el botón LTS). Si no lo tienes,
+     el archivo de inicio te avisa y te abre la página.
+
+PARA ABRIRLO
+  Doble clic en "Iniciar ClipViral" (el archivo con engranajes).
+
+  La primera vez:
+    - Instala lo que necesita (tarda unos minutos, solo esa vez).
+    - Te pide tu nombre, tu correo y una contraseña para TU cuenta de administrador.
+      La contraseña no se ve mientras la escribes: es normal.
+    - Te pide tu clave de Claude para la IA Pro (opcional, la puedes poner después).
+    - Te ofrece un acceso directo en el escritorio.
+    - Abre la app con tu cuenta ya iniciada.
+
+  Las demás veces te saluda y abre la app directo.
+  No cierres la ventana negra mientras uses ClipViral. Al cerrar la app, se apaga sola.
+
+TU CLAVE DE CLAUDE (IA PRO)
+  La IA Pro usa tu propia cuenta de Claude, y lo que gaste se cobra ahí.
+  1. Entra a https://console.anthropic.com/settings/keys y toca "Create Key".
+  2. Pon saldo en "Billing" (unos pocos dólares alcanzan para muchas horas).
+  3. Pega la clave en la app: Ajustes -> Clave de Claude -> Probar y guardar.
+  Sin clave, la app funciona igual en modo Local.
+
+DENTRO DE LA APP
+  - La primera vez, en Directo toca "Instalar ahora": descarga las herramientas
+    para leer YouTube y hacer los clips (unos 360 MB).
+  - Panel de administrador (en el navegador): http://localhost:4600/admin/
+
+CONECTAR TU FACEBOOK E INSTAGRAM (para publicar desde la app)
+  Cada persona usa SU propia app de Meta y SUS propias cuentas.
+  1. Entra a https://developers.facebook.com con tu Facebook -> "Crear app"
+     (tipo Empresa). Tu Instagram debe estar unido a tu página de Facebook.
+  2. En tu app de Meta: Configuración -> Básica. Copia el "Identificador de la app"
+     y la "Clave secreta de la app".
+  3. Abre el panel de administrador (http://localhost:4600/admin/), pestaña
+     "Permisos de redes", parte de Facebook: pega ahí el ID y la clave secreta y guarda.
+  4. En ClipViral ve a Redes -> "Conectar con un token (uso personal)" y sigue
+     los pasos que te muestra (el token se saca del Explorador de la API Graph).
+  Más detalles en README.md, sección "Uso personal: conectar con un token".
+
+SI YOUTUBE DICE "CONFIRMA QUE NO ERES UN ROBOT"
+  1. En Chrome o Edge instala la extensión "Get cookies.txt LOCALLY".
+  2. Abre youtube.com con tu sesión iniciada -> toca la extensión -> Export.
+  3. En ClipViral: Ajustes -> Cookies de YouTube -> "Elegir archivo cookies.txt"
+     -> elige el archivo descargado -> Probar.

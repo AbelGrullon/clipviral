@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ClipViral · Panel de admin</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <div class="bg"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+
+  <!-- Login -->
+  <section id="login" class="login hidden">
+    <form id="loginForm" class="card login-card pop-in">
+      <div class="brand big"><span class="logo">▶</span> ClipViral <small>Admin</small></div>
+      <p class="muted">Entra con tu cuenta de administrador.</p>
+      <label>Correo<input name="email" type="email" required autocomplete="username" /></label>
+      <label>Contraseña<input name="password" type="password" required autocomplete="current-password" /></label>
+      <button class="btn primary wide" type="submit"><span>Entrar</span></button>
+      <p id="loginError" class="error"></p>
+    </form>
+  </section>
+
+  <!-- Panel -->
+  <section id="app" class="layout hidden">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">▶</span> ClipViral <small>Admin</small></div>
+      <nav id="nav">
+        <button data-tab="resumen" class="active"><i>📊</i> Resumen</button>
+        <button data-tab="usuarios"><i>👥</i> Usuarios</button>
+        <button data-tab="pagos"><i>💳</i> Pagos</button>
+        <button data-tab="correos"><i>✉️</i> Correos</button>
+        <button data-tab="planes"><i>💎</i> Planes y precios</button>
+        <button data-tab="versiones"><i>🚀</i> Actualizaciones</button>
+        <button data-tab="permisos"><i>📋</i> Permisos de redes</button>
+        <button data-tab="ajustes"><i>⚙️</i> Ajustes</button>
+      </nav>
+      <div class="me">
+        <div id="meName" class="me-name"></div>
+        <button id="logout" class="btn ghost small">Salir</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- Resumen -->
+      <div class="tab" data-tab="resumen">
+        <header class="tab-head"><h1>Resumen</h1><span id="aiBadge" class="badge"></span></header>
+        <div class="stats" id="stats"></div>
+        <div class="grid2">
+          <div class="card"><h3>Registros (últimos 14 días)</h3><div id="chartSignups" class="bars"></div></div>
+          <div class="card"><h3>Costo de IA por día (USD)</h3><div id="chartAi" class="bars alt"></div></div>
+        </div>
+        <div class="grid2">
+          <div class="card"><h3>🎬 Clips sacados (últimos 14 días)</h3><div id="chartClips" class="bars"></div></div>
+          <div class="card"><h3>💳 Cobrado por día (USD)</h3><div id="chartIncome" class="bars alt"></div></div>
+        </div>
+        <div class="grid2">
+          <div class="card"><h3>Clips por modo</h3><div id="clipsMode" class="pills"></div></div>
+          <div class="card"><h3>Quiénes sacan más clips</h3><div id="topClippers" class="list"></div></div>
+        </div>
+        <div class="grid2">
+          <div class="card"><h3>Usuarios por plan</h3><div id="byPlan" class="pills"></div></div>
+          <div class="card"><h3>Últimos registros</h3><div id="recent" class="list"></div></div>
+        </div>
+      </div>
+
+      <!-- Usuarios -->
+      <div class="tab hidden" data-tab="usuarios">
+        <header class="tab-head"><h1>Usuarios</h1>
+          <input id="userSearch" class="search" placeholder="Buscar por nombre o correo…" />
+        </header>
+        <div class="card table-card">
+          <table>
+            <thead><tr><th>Usuario</th><th>Plan</th><th>Vence</th><th>Clips</th><th>Pagado</th><th>Último acceso</th><th></th></tr></thead>
+            <tbody id="usersBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Pagos -->
+      <div class="tab hidden" data-tab="pagos">
+        <header class="tab-head"><h1>Pagos</h1><span id="payBadge" class="badge"></span></header>
+        <form id="paypalForm" class="card form" autocomplete="off">
+          <h3>💳 PayPal (pagos con tarjeta)</h3>
+          <p class="muted tiny">Tus clientes pagan con tarjeta en la página segura de PayPal (no necesitan cuenta PayPal) y cada pago suma <b>un mes</b> de licencia del plan que eligieron.
+            Las claves salen de <a href="https://developer.paypal.com/dashboard/applications" target="_blank" rel="noopener">developer.paypal.com → Apps &amp; Credentials</a>.
+            Empieza en <b>Prueba (Sandbox)</b>; cuando todo funcione, cambia a <b>Real (Live)</b> con las claves "Live".</p>
+          <label>Modo<select name="mode"><option value="sandbox">Prueba (Sandbox): no cobra de verdad</option><option value="live">Real (Live): cobra de verdad</option></select></label>
+          <label>Client ID<input name="clientId" placeholder="Empieza con A…" spellcheck="false" /></label>
+          <label>Secret<input name="secret" type="password" placeholder="Déjalo vacío para no cambiarlo" spellcheck="false" /></label>
+          <div class="modal-actions"><button class="btn primary" type="submit"><span>Guardar</span></button><button class="btn" type="button" id="paypalTest">Probar conexión</button></div>
+        </form>
+        <div class="card table-card">
+          <h3 style="padding:16px 16px 0">Últimos pagos</h3>
+          <table>
+            <thead><tr><th>Cliente</th><th>Plan</th><th>Monto</th><th>Estado</th><th>Fecha</th><th>Licencia hasta</th></tr></thead>
+            <tbody id="paymentsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Correos -->
+      <div class="tab hidden" data-tab="correos">
+        <header class="tab-head"><h1>Correos</h1><span id="mailBadge" class="badge"></span></header>
+        <div class="grid2">
+          <form id="mailForm" class="card form" autocomplete="off">
+            <h3>✉️ Enviar desde Gmail</h3>
+            <p class="muted tiny">Usa una <b>contraseña de aplicación</b> de Google (no tu contraseña normal): myaccount.google.com → Seguridad → Verificación en 2 pasos (actívala) → <b>Contraseñas de aplicaciones</b> → crea una para "ClipViral" y pega aquí las 16 letras.</p>
+            <label>Tu Gmail<input name="user" type="email" placeholder="tucorreo@gmail.com" /></label>
+            <label>Contraseña de aplicación<input name="pass" type="password" placeholder="Déjalo vacío para no cambiarla" spellcheck="false" /></label>
+            <label>Nombre que verán<input name="fromName" placeholder="ClipViral" /></label>
+            <details><summary class="muted tiny">Otro proveedor (avanzado)</summary>
+              <label>Servidor SMTP<input name="host" placeholder="smtp.gmail.com" /></label>
+              <label>Puerto<input name="port" type="number" placeholder="465" /></label>
+            </details>
+            <h3 style="margin-top:14px">Correos automáticos</h3>
+            <label class="check"><input type="checkbox" name="bienvenida" /> Bienvenida al registrarse</label>
+            <label class="check"><input type="checkbox" name="pago" /> Pago recibido (con la fecha de la licencia)</label>
+            <label class="check"><input type="checkbox" name="vencimiento" /> Aviso 3 días antes de vencer y al vencer</label>
+            <p class="muted tiny">Recuperar la contraseña siempre se envía (es un código de 6 números que vence en 30 minutos).</p>
+            <div class="modal-actions"><button class="btn primary" type="submit"><span>Guardar</span></button><button class="btn" type="button" id="mailTest">Enviarme una prueba</button></div>
+          </form>
+          <form id="noticeForm" class="card form">
+            <h3>📣 Enviar un aviso</h3>
+            <label>Para<select name="to" id="noticeTo"></select></label>
+            <label>Asunto<input name="subject" maxlength="150" placeholder="Ej.: Nueva versión de ClipViral" /></label>
+            <label>Mensaje<textarea name="message" rows="7" placeholder="Escribe el mensaje. Deja una línea en blanco para separar párrafos."></textarea></label>
+            <div class="modal-actions"><button class="btn primary" type="submit"><span>Enviar aviso</span></button></div>
+            <p class="muted tiny">Se envían de a uno (Gmail permite unos 500 por día).</p>
+          </form>
+        </div>
+        <div class="card"><h3>Últimos correos</h3><div id="mailLog" class="list"></div></div>
+      </div>
+
+      <!-- Planes -->
+      <div class="tab hidden" data-tab="planes">
+        <header class="tab-head"><h1>Planes y precios</h1></header>
+        <p class="muted">El costo de IA es un estimado: entre $0.04 y $0.10 por hora analizada con Haiku + Sonnet. En "Resumen" ves el costo real del mes.</p>
+        <div id="plans" class="plans"></div>
+      </div>
+
+      <!-- Actualizaciones -->
+      <div class="tab hidden" data-tab="versiones">
+        <header class="tab-head"><h1>Actualizaciones</h1></header>
+        <form id="releaseForm" class="card upload">
+          <label id="drop" class="drop">
+            <input type="file" name="file" accept=".exe" hidden />
+            <span class="drop-icon">⬆️</span>
+            <strong id="dropText">Arrastra aquí el instalador (.exe) o haz clic</strong>
+            <small class="muted">Se genera con: npm run instalador (carpeta desktop)</small>
+          </label>
+          <div class="row">
+            <label>Versión<input name="version" placeholder="1.0.1" required pattern="v?\d+\.\d+\.\d+" /></label>
+            <label class="check"><input type="checkbox" name="mandatory" /> Obligatoria</label>
+          </div>
+          <label>Novedades<textarea name="notes" rows="3" placeholder="Qué cambió en esta versión…"></textarea></label>
+          <div class="progress hidden" id="uploadProgress"><span></span></div>
+          <button class="btn primary" type="submit"><span>Publicar versión</span></button>
+        </form>
+        <div class="card"><h3>Versiones publicadas</h3><div id="releases" class="list"></div></div>
+      </div>
+
+      <!-- Permisos de redes -->
+      <div class="tab hidden" data-tab="permisos">
+        <header class="tab-head"><h1>Permisos de redes</h1></header>
+        <p class="muted">Lo que necesitas para pedir a TikTok y Meta los permisos de publicar en público. Toca una dirección para copiarla y pégala donde dice.
+          La guía paso a paso (con el texto en inglés para justificar cada permiso) está en <code>GUIA-PERMISOS-REDES.md</code>, en la carpeta del proyecto.</p>
+        <div id="checklist"></div>
+      </div>
+
+      <!-- Ajustes -->
+      <div class="tab hidden" data-tab="ajustes">
+        <header class="tab-head"><h1>Ajustes</h1></header>
+        <form id="claudeForm" class="card form" autocomplete="off">
+          <h3 class="with-badge">🔑 Clave de Claude (IA Pro) <span id="claudeBadge" class="badge"></span></h3>
+          <p class="muted">La IA Pro usa tu propia cuenta de Claude: lo que gaste se cobra ahí. Crea la clave en
+            <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com → API Keys</a>
+            y ten saldo en Billing. Se guarda cifrada en este servidor y nunca se muestra completa.</p>
+          <p id="claudeNow" class="tiny"></p>
+          <label>Clave nueva<input name="key" type="password" spellcheck="false" placeholder="sk-ant-…" /></label>
+          <div class="btn-row">
+            <button class="btn primary" type="submit"><span>Probar y guardar</span></button>
+            <button class="btn ghost hidden" type="button" id="claudeRemove">Quitar la clave guardada</button>
+          </div>
+          <p class="muted tiny" style="margin:0">Probarla no cuesta nada: solo se le pregunta a Claude si la clave existe.</p>
+        </form>
+
+        <form id="settingsForm" class="card form">
+          <label>Días de prueba gratis para cuentas nuevas<input name="trial_days" type="number" min="0" max="60" /></label>
+          <label>Enlace de pago (PayPal, Stripe, WhatsApp…). Se abre al tocar "Comprar" en la app<input name="payment_link" placeholder="https://…" /></label>
+          <label>Contacto de soporte<input name="support_contact" placeholder="WhatsApp o correo" /></label>
+          <label>Anuncio para todos los usuarios (sale arriba en la app)<input name="announcement" placeholder="Ej.: ¡Nueva función de subtítulos!" /></label>
+          <h3 style="margin:14px 0 0">🏢 Datos para las páginas legales</h3>
+          <p class="muted tiny" style="margin:0">Salen en la política de privacidad, los términos y la página de borrar datos (<a href="/privacidad" target="_blank">ver</a>). TikTok y Meta las revisan.</p>
+          <label>Nombre del responsable (tu nombre o el de tu negocio)<input name="legal_name" placeholder="Ej.: Clips Digitales SRL" /></label>
+          <label>Correo para temas de privacidad<input name="legal_email" type="email" placeholder="privacidad@tudominio.com" /></label>
+          <label>País (sus leyes aplican a los términos)<input name="legal_country" placeholder="Ej.: República Dominicana" /></label>
+          <button class="btn primary" type="submit"><span>Guardar ajustes</span></button>
+        </form>
+
+        <form id="socialForm" class="card form">
+          <h3>📲 Conexión con redes</h3>
+          <p class="muted">Registra la app una vez en cada red y pega aquí sus claves. Así los clientes pueden conectar sus cuentas, subir con un clic y, si lo encienden, publicar solos en Instagram, TikTok y Facebook. Los secretos se guardan solo en el servidor. En <b>Permisos de redes</b> ves lo que falta y todas las direcciones para copiar.</p>
+          <label>Dirección pública del servidor (con https cuando esté en tu VPS)<input name="public_url" placeholder="https://api.tudominio.com" /></label>
+
+          <div class="social-box"><h4>▶️ YouTube <span class="badge" data-social="youtube"></span></h4>
+            <p class="muted tiny">Google Cloud Console → crea un proyecto → activa "YouTube Data API v3" → Credenciales → ID de cliente OAuth (Aplicación web). Pega esta dirección en "URI de redireccionamiento autorizados":</p>
+            <code class="redirect" data-redirect="youtube"></code>
+            <label>ID de cliente<input name="google_client_id" /></label>
+            <label>Secreto de cliente<input name="google_client_secret" /></label></div>
+
+          <div class="social-box"><h4>🎵 TikTok <span class="badge" data-social="tiktok"></span></h4>
+            <p class="muted tiny">developers.tiktok.com → crea una app → agrega "Login Kit", "Content Posting API" (activa Direct Post) y "Webhooks". Pega esta dirección como Redirect URI (las demás están en Permisos de redes):</p>
+            <code class="redirect" data-redirect="tiktok"></code>
+            <label>Client key<input name="tiktok_client_key" /></label>
+            <label>Client secret<input name="tiktok_client_secret" /></label></div>
+
+          <div class="social-box"><h4>📸 Instagram Reels <span class="badge" data-social="instagram"></span></h4>
+            <p class="muted tiny">developers.facebook.com → crea una app tipo "Empresa" → agrega "Instagram" → "API con inicio de sesión de Instagram". Pega esta dirección como URL de redireccionamiento (las cuentas deben ser Profesionales):</p>
+            <code class="redirect" data-redirect="instagram"></code>
+            <label>ID de la app de Instagram<input name="instagram_app_id" /></label>
+            <label>Clave secreta de la app de Instagram<input name="instagram_app_secret" /></label></div>
+
+          <div class="social-box"><h4>📘 Facebook Reels <span class="badge" data-social="facebook"></span></h4>
+            <p class="muted tiny">En la misma app de developers.facebook.com → agrega "Inicio de sesión con Facebook para empresas" → en Configuración pega esta dirección como URI de redireccionamiento válido. Publica en la <b>página</b> de Facebook que el cliente elija. Para publicar en público, Meta debe aprobar <code>pages_show_list</code>, <code>pages_read_engagement</code>, <code>pages_manage_posts</code>, <code>read_insights</code> e <code>instagram_basic</code> (este último sirve para ver la competencia en Instagram).</p>
+            <code class="redirect" data-redirect="facebook"></code>
+            <label>ID de la app (Configuración → Básica)<input name="facebook_app_id" /></label>
+            <label>Clave secreta de la app<input name="facebook_app_secret" /></label>
+            <label>ID de configuración (opcional: Inicio de sesión con Facebook para empresas → Configuraciones)<input name="facebook_config_id" placeholder="Si lo pones, se usa en vez de la lista de permisos" /></label></div>
+
+          <div id="uploadStats" class="muted tiny"></div>
+          <button class="btn primary" type="submit"><span>Guardar redes</span></button>
+        </form>
+      </div>
+    </main>
+  </section>
+
+  <!-- Modal de usuario -->
+  <div id="modal" class="modal hidden">
+    <div class="card modal-card pop-in" id="modalCard"></div>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+  <script src="admin.js"></script>
+</body>
+</html>

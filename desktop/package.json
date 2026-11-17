@@ -1,0 +1,52 @@
+{
+  "name": "clipviral",
+  "productName": "ClipViral",
+  "version": "1.0.0",
+  "description": "Saca clips virales con subtítulos de directos de YouTube",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "captura": "electron . --captura=captura.png",
+    "test": "node --test \"test/**/*.test.js\"",
+    "instalador": "electron-builder --win nsis",
+    "instalador-cliente": "electron-builder --win nsis --config instalador-cliente.json",
+    "instalador-admin": "electron-builder --win nsis --config instalador-admin.json"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.2",
+    "adm-zip": "^0.5.16",
+    "youtube-chat": "^2.2.0"
+  },
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "latest"
+  },
+  "build": {
+    "appId": "com.clipviral.app",
+    "productName": "ClipViral",
+    "artifactName": "ClipViral-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app-config.json",
+      "engine/**",
+      "renderer/**",
+      "package.json",
+      "licencia-publica.pem"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

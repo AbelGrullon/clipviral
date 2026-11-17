@@ -1,0 +1,8 @@
+{
+  "name": "clipviral-grabador",
+  "productName": "ClipViral - Video para Meta",
+  "version": "1.0.0",
+  "description": "Graba el video de demostración para la revisión de Meta, con subtítulos en inglés",
+  "main": "main.js",
+  "private": true
+}
