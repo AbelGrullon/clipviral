@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, currentPeriod, planInfo } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { withKey, aiErrorMessage, scanWindow, pickClips, rankVideos, competitorReport, costOf } from '../claude.js';
+import { withKey, aiErrorMessage, scanWindow, pickClips, rankVideos, competitorReport, findCamera, costOf, cut } from '../claude.js';
 import { cleanPickedClip } from '../textos.js';
 import { keyForUser } from '../clave.js';
 
@@ -17,7 +17,7 @@ const fmt = (s) => {
   const t = Math.max(0, Math.round(s));
   return `${String(Math.floor(t / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
 };
-const clean = (text, max) => String(text ?? '').replace(/\s+/g, ' ').slice(0, max);
+const clean = (text, max) => cut(String(text ?? '').replace(/\s+/g, ' '), max);
 
 function checkAccess(req, res) {
   const plan = planInfo(req.user);
@@ -136,6 +136,24 @@ ${blocks}`;
   } catch (err) {
     console.error('Error en /ai/pick:', err?.status, err?.message);
     res.status(502).json({ error: aiErrorMessage(err, 'La IA no respondió al elegir clips. Se reintentará.') });
+  }
+});
+
+/** Cámara + juego: Haiku busca la cámara del streamer en 1 o 2 fotos (una vez por directo, no descuenta horas). */
+router.post('/camara', async (req, res) => {
+  if (!checkAccess(req, res)) return;
+  const images = (Array.isArray(req.body?.images) ? req.body.images : [])
+    .slice(0, 2)
+    .map((b) => String(b || ''))
+    .filter((b) => /^[A-Za-z0-9+/=]+$/.test(b) && b.length < 1_200_000);
+  if (!images.length) return res.status(400).json({ error: 'Faltan las fotos del directo.' });
+  try {
+    const result = await findCamera(images);
+    const cost = logUsage(req.user.id, 'camara', result.model, result.usage, 0);
+    res.json({ caja: result.camara && result.caja.length === 4 ? result.caja : null, costUsd: cost });
+  } catch (err) {
+    console.error('Error en /ai/camara:', err?.status, err?.message);
+    res.status(502).json({ error: aiErrorMessage(err, 'La IA no pudo buscar la cámara.') });
   }
 });
 

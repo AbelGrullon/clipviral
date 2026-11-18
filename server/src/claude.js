@@ -75,6 +75,16 @@ export function aiErrorMessage(err, fallback) {
   return fallback;
 }
 
+/**
+ * Recorta un texto sin partir un emoji por la mitad (y arregla los que ya vengan partidos del chat o la transcripción).
+ * Medio emoji hace que Claude rechace la consulta entera ("unexpected end of hex escape").
+ */
+export function cut(text, max = Infinity) {
+  let s = String(text ?? '');
+  if (s.length > max) s = s.slice(0, /[\uD800-\uDBFF]/.test(s[max - 1]) ? max - 1 : max);
+  return s.toWellFormed();
+}
+
 export const HAIKU = 'claude-haiku-5-5';
 export const SONNET = 'claude-sonnet-5-5';
 export const OPUS = 'claude-opus-5-5';
@@ -210,6 +220,41 @@ function readJson(response) {
   }
 }
 
+// ---------- Cámara + juego: ¿dónde está la cámara del streamer? ----------
+const CAM_SCHEMA = {
+  type: 'object',
+  properties: { camara: { type: 'boolean' }, caja: { type: 'array', items: { type: 'integer' } } },
+  required: ['camara', 'caja'],
+  additionalProperties: false,
+};
+
+/**
+ * Haiku mira 1 o 2 fotos de un directo y dice dónde está el recuadro de la cámara (0 a 1000).
+ * La app después ajusta el borde sola al marco real.
+ */
+export async function findCamera(images) {
+  const response = await getClient().messages.create({
+    model: HAIKU,
+    max_tokens: 300,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: CAM_SCHEMA } },
+    messages: [{
+      role: 'user',
+      content: [
+        ...images.map((data) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } })),
+        {
+          type: 'text',
+          text: 'These are frames from the same live stream. Many streamers show their webcam (the real person filmed by a camera) '
+            + 'in a small rectangle on top of the game. If there is a webcam rectangle, give its bounding box as [x1, y1, x2, y2] '
+            + 'in 0-1000 relative coordinates of the image (0,0 = top left), covering the whole webcam rectangle including its frame. '
+            + 'Characters inside the game are not the webcam. If there is no game (the whole image is a camera) or no webcam, camara=false and caja=[].',
+        },
+      ],
+    }],
+  });
+  const data = readJson(response);
+  return { camara: !!data?.camara, caja: Array.isArray(data?.caja) ? data.caja.slice(0, 4).map(Number) : [], model: response.model || HAIKU, usage: response.usage };
+}
+
 // ---------- Piloto automático: ¿vale la pena clipear estos videos? ----------
 const RANK_SYSTEM = `Ayudas a un creador de clips virales a decidir qué videos de YouTube revisar.
 Recibes los temas que le interesan y una lista de videos recién subidos (título, canal, vistas de hoy, duración).
@@ -244,7 +289,7 @@ export async function rankVideos(prompt) {
     max_tokens: 8000,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: RANK_SCHEMA } },
     system: RANK_SYSTEM,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: cut(prompt) }],
   });
   const data = readJson(response);
   return { notes: Array.isArray(data?.notes) ? data.notes : [], model: response.model || HAIKU, usage: response.usage };
@@ -292,7 +337,7 @@ export async function competitorReport(prompt) {
     fallbacks: 'default',
     output_config: { effort: 'medium', format: { type: 'json_schema', schema: REPORT_SCHEMA } },
     system: REPORT_SYSTEM,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: cut(prompt) }],
   });
   return { report: readJson(response), model: response.model || OPUS, usage: response.usage };
 }
@@ -304,7 +349,7 @@ export async function scanWindow(prompt) {
     max_tokens: 4000,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: SCAN_SCHEMA } },
     system: SCAN_SYSTEM,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: cut(prompt) }],
   });
   const data = readJson(response);
   return {
@@ -324,7 +369,7 @@ export async function pickClips(prompt) {
     fallbacks: 'default',
     output_config: { effort: 'low', format: { type: 'json_schema', schema: PICK_SCHEMA } },
     system: PICK_SYSTEM,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: cut(prompt) }],
   });
   const data = readJson(response);
   return {

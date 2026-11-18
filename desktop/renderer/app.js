@@ -339,6 +339,7 @@ const PAGES = [
   { id: 'agente', soloAdmin: true, label: 'Agente', en: 'Agent', icon: svg('<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 13h.01M15 13h.01M9 17h6"/><circle cx="12" cy="3" r="1"/>') },
   { id: 'competencia', label: 'Competencia', en: 'Competitors', icon: svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>') },
   { id: 'claves', soloAdmin: true, completa: true, label: 'Claves de clientes', en: 'Customer keys', icon: svg('<circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.2-8.2M17 6l3 3M15 8l2 2"/>') },
+  { id: 'panel', soloAdmin: true, link: true, label: 'Panel de administración', en: 'Admin panel', icon: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17.5h7M17.5 14v7"/>') },
   { id: 'plan', label: 'Mi plan', en: 'My plan', icon: I.plan },
   { id: 'ajustes', label: 'Ajustes', en: 'Settings', icon: I.settings },
 ];
@@ -404,7 +405,8 @@ function renderNav() {
     b.dataset.page = p.id;
     b.innerHTML = `${p.icon}<span class="nav-label">${esc(label)}</span>`;
     b.title = label;
-    b.onclick = () => go(p.id);
+    // El panel de administración se abre en el navegador (usuarios, membresías, pagos, versiones).
+    b.onclick = p.link ? () => api.openUrl(`${String(S.appInfo?.serverUrl || '').replace(/\/+$/, '')}/admin/`) : () => go(p.id);
     nav.append(b);
   }
   updateNavBadges();
@@ -581,7 +583,9 @@ function renderDirecto(el) {
       </div>
       <div class="card">
         <div class="opt-row"><span>Duración</span><div class="chips">${chips('clipSeconds', [[15, '15 s'], [30, '30 s'], [45, '45 s'], [60, '60 s'], [90, '90 s'], [120, '2 min']])}</div></div>
-        <div class="opt-row"><span>Formato</span><div class="chips">${chips('style', [['blur', 'Vertical con fondo', '<i class="fmt"></i>'], ['recorte', 'Vertical recortado', '<i class="fmt"></i>'], ['horizontal', 'Horizontal', '<i class="fmt wide"></i>']])}</div></div>
+        <div class="opt-row"><span>Formato</span><div class="chips">${chips('style', [['blur', 'Vertical con fondo', '<i class="fmt"></i>'], ['recorte', 'Vertical recortado', '<i class="fmt"></i>'], ['camara', 'Cámara + juego', '<i class="fmt split"></i>'], ['horizontal', 'Horizontal', '<i class="fmt wide"></i>']])}</div></div>
+        <p class="muted tiny cam-hint ${s.style === 'camara' ? '' : 'hidden'}" id="camHint">Para directos de juegos con la cámara del streamer en una esquina: la cámara va arriba y el juego abajo.
+          La encuentra sola la IA que mira el video (o Claude, en el modo IA Pro). Si se equivoca, toca "Ajustar cámara" mientras graba. Los subtítulos van más chicos, dentro de la cámara, para no tapar el juego. Si no hay cámara, el clip va con fondo.</p>
         <div class="opt-row"><span>Subtítulos</span><div class="chips" style="align-items:center">
           <label class="toggle" title="Subtítulos"><input type="checkbox" id="subsToggle" ${s.subtitles ? 'checked' : ''}/><span></span></label>
           <span class="muted tiny">Colores, letra y posición en "Estilo del clip" ↓</span></div></div>
@@ -611,6 +615,7 @@ function renderDirecto(el) {
     const val = c.dataset.key === 'clipSeconds' ? Number(c.dataset.val) : c.dataset.val;
     saveSetting({ [c.dataset.key]: val });
     $$(`.chip[data-key=${c.dataset.key}]`, el).forEach((x) => x.classList.toggle('active', x === c));
+    if (c.dataset.key === 'style') $('#camHint')?.classList.toggle('hidden', val !== 'camara');
   }));
   $('#subsToggle').onchange = (e) => { saveSetting({ subtitles: e.target.checked }); renderStylePreview(); };
   renderStyleCard($('#styleCard'));
@@ -649,6 +654,8 @@ function renderDirecto(el) {
 function renderLive(el) {
   const st = S.engine;
   const info = st.info || {};
+  // Con Claude (IA Pro) se ve cuánto va costando.
+  const withCost = st.mode === 'ia' || st.aiCalls > 0;
   el.innerHTML = `
     <div class="grid">
       <div class="card live-head pop-in">
@@ -658,13 +665,16 @@ function renderLive(el) {
           <div class="live-title">${esc(info.title || 'Abriendo el enlace…')}</div>
           <div class="muted">${esc(info.channel || '')}</div>
         </div>
+        ${S.settings.style === 'camara' ? '<button class="btn ghost" id="camBtn" title="Marcar dónde está la cámara del streamer">📷 <span>Ajustar cámara</span></button>' : ''}
         <button class="btn danger" id="stopBtn">${I.stop}<span>Detener</span></button>
       </div>
-      <div class="grid cols-4 stagger">
+      <div class="grid ${withCost ? 'cols-5' : 'cols-4'} stagger">
         <div class="card stat"><div class="label">${I.clock} Grabado</div><div class="value" id="stRec">0:00</div></div>
         <div class="card stat"><div class="label">${I.wave} Analizado</div><div class="value" id="stAna">0:00</div></div>
         <div class="card stat"><div class="label">${I.chat} Mensajes del chat</div><div class="value" id="stChat">0</div></div>
         <div class="card stat"><div class="label">${I.film} Clips creados</div><div class="value" id="stClips">0</div></div>
+        ${withCost ? `<div class="card stat cost-stat" title="Lo que van costando las consultas a Claude en este directo (se cobra en tu cuenta de Claude)">
+          <div class="label">💲 Gasto de Claude</div><div class="value" id="stCost">US$ 0.00</div><div class="stat-sub" id="stCostSub">Todavía sin consultas</div></div>` : ''}
       </div>
       <div class="card pop-in"><h3>📈 Actividad del directo <span class="muted tiny">(los picos son posibles clips)</span></h3><canvas class="chart" id="chart"></canvas></div>
       <div class="grid cols-2">
@@ -680,11 +690,70 @@ function renderLive(el) {
     $('#stopBtn').classList.add('loading');
     api.stopEngine();
   };
+  $('#camBtn')?.addEventListener('click', ajustarCamara);
   $('#feed').innerHTML = S.logs.slice(-80).reverse().map(feedItem).join('');
   renderMiniClips();
   renderProducing();
   updateLive(st, true);
   requestAnimationFrame(drawChart);
+}
+
+// ---------- Cámara + juego: marcar la cámara a mano ----------
+const camOk = (b) => b && b.w >= 0.08 && b.h >= 0.08 && b.w * b.h >= 0.015 && b.w * b.h <= 0.45;
+
+async function ajustarCamara() {
+  const btn = $('#camBtn');
+  btn?.classList.add('loading');
+  let shot;
+  try { shot = await api.camaraFoto(); } catch (err) { return toast(String(err?.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'bad'); } finally { btn?.classList.toggle('loading', false); }
+  camModal(shot);
+}
+
+/** shot: { image, box (0 a 1) o null, manual, channel } */
+function camModal(shot) {
+  let box = shot.box ? { ...shot.box } : null;
+  const m = modal(`<div class="cam-modal"><h2>📷 Ajustar cámara</h2>
+    <p class="muted">Arrastra sobre la foto para marcar el recuadro de la cámara del streamer. Se guarda para <b>${esc(shot.channel || 'este canal')}</b>
+      y se usa desde el próximo clip (también en sus próximos directos).</p>
+    <div class="cam-pick" id="camPick"><img src="${shot.image}" alt="" draggable="false"><div class="cam-box hidden" id="camBox"><span>Cámara</span></div></div>
+    <p class="error" id="camErr"></p>
+    <div class="modal-actions">
+      ${shot.manual ? '<button class="btn ghost" data-auto>Que la busque sola</button>' : ''}
+      <button class="btn ghost" data-no>Cancelar</button>
+      <button class="btn primary" data-save><span>Guardar cámara</span></button>
+    </div></div>`, { wide: true });
+  const pick = $('#camPick', m.el);
+  const frame = $('#camBox', m.el);
+  const draw = () => {
+    frame.classList.toggle('hidden', !box);
+    if (box) Object.assign(frame.style, { left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` });
+    $('[data-save]', m.el).disabled = !camOk(box);
+    $('#camErr', m.el).textContent = box && box.w > 0.02 && !camOk(box)
+      ? (box.w * box.h > 0.45 ? 'Es muy grande: marca solo el recuadro de la cámara.' : 'Es muy chico: marca todo el recuadro de la cámara.') : '';
+  };
+  draw();
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+  const at = (e) => { const r = pick.getBoundingClientRect(); return { x: clamp01((e.clientX - r.left) / r.width), y: clamp01((e.clientY - r.top) / r.height) }; };
+  let from = null;
+  pick.onpointerdown = (e) => { from = at(e); pick.setPointerCapture(e.pointerId); box = { ...from, w: 0, h: 0 }; draw(); };
+  pick.onpointermove = (e) => {
+    if (!from) return;
+    const p = at(e);
+    box = { x: Math.min(from.x, p.x), y: Math.min(from.y, p.y), w: Math.abs(p.x - from.x), h: Math.abs(p.y - from.y) };
+    draw();
+  };
+  pick.onpointerup = () => { from = null; };
+  $('[data-no]', m.el).onclick = m.close;
+  $('[data-auto]', m.el)?.addEventListener('click', async () => {
+    await api.camaraGuardar(shot.channel, null);
+    m.close();
+    toast('Listo: la cámara se vuelve a buscar sola', 'ok', '📷');
+  });
+  $('[data-save]', m.el).onclick = async () => {
+    await api.camaraGuardar(shot.channel, box);
+    m.close();
+    toast('Cámara guardada para este canal. Se usa desde el próximo clip.', 'ok', '📷');
+  };
 }
 
 function feedItem(l) {
@@ -701,10 +770,34 @@ function updateLive(st, first) {
     countUp(clipsEl, st.clips, fmtNum, 500);
     if (!first) { clipsEl.classList.remove('bump'); void clipsEl.offsetWidth; clipsEl.classList.add('bump'); }
   }
+  updateCost(st);
   const info = st.info || {};
   $('#liveBadges').innerHTML = `${info.isLive ? '<span class="badge live">EN VIVO</span>' : info.title ? '<span class="badge">VIDEO</span>' : ''}
     <span class="badge ${st.mode === 'ia' ? 'grad' : ''}">${st.mode === 'ia' ? '✨ IA Pro' : '💻 Local'}</span>
     ${st.state === 'finishing' ? '<span class="badge warn">Terminando…</span>' : st.state === 'starting' ? '<span class="badge">Iniciando…</span>' : ''}`;
+}
+
+/** Dólares: con centavos chicos se muestran más decimales (una consulta a Haiku cuesta menos de un centavo). */
+function fmtUsd(v) {
+  const n = Number(v) || 0;
+  return `US$ ${n === 0 ? '0.00' : n < 0.01 ? n.toFixed(4) : n < 1 ? n.toFixed(3) : n.toFixed(2)}`;
+}
+
+function updateCost(st) {
+  const el = $('#stCost');
+  if (!el) return;
+  const cost = Number(st.aiCostUsd) || 0;
+  const calls = Number(st.aiCalls) || 0;
+  if (el.dataset.v !== String(cost)) {
+    const changed = el.dataset.v !== undefined;
+    el.dataset.v = String(cost);
+    el.textContent = fmtUsd(cost);
+    if (changed) { el.classList.toggle('bump', false); void el.offsetWidth; el.classList.toggle('bump', true); }
+  }
+  // Cuánto saldría una hora de directo a este ritmo (cuando ya hay bastante analizado para estimar).
+  const perHour = st.analyzed >= 300 && cost > 0 ? cost / (st.analyzed / 3600) : 0;
+  $('#stCostSub').textContent = !calls ? 'Todavía sin consultas'
+    : `${fmtNum(calls)} consulta${calls === 1 ? '' : 's'}${perHour ? ` · ≈ ${fmtUsd(perHour)} por hora` : ''}`;
 }
 
 function renderMiniClips() {
@@ -942,7 +1035,7 @@ function renderPlan(el) {
               <li>IA local que ve y escucha: risas, gritos, chat y reacciones</li>
               ${pl.usesAi ? `<li><span>${pl.aiHours >= 100000 ? '<b>Claude sin límite de horas</b>' : `<b>${pl.aiHours} h</b> al mes con Claude`}, con tu propia clave de Claude</span></li><li>Títulos, descripciones y hashtags automáticos</li>` : '<li>Títulos y hashtags con IA local (Ollama)</li>'}
             </ul>
-            <button class="btn ${pl.id === 'pro' ? 'primary' : ''} wide" data-buy="${pl.id}"><span>${PAYPAL_ACTIVO ? (pl.id === p.id && p.active ? 'Renovar (+1 mes)' : 'Elegir plan') : (pl.id === p.id && p.active ? 'Renovar por WhatsApp' : 'Comprar por WhatsApp')}</span></button>
+            <button class="btn ${pl.id === 'pro' ? 'primary' : ''} wide" data-buy="${pl.id}"><span>${pl.id === p.id && p.active ? 'Renovar (+1 mes)' : 'Elegir plan'}</span></button>
           </div>`).join('')}
       </div>
       <div class="card hidden" id="myPayments"><h3 style="margin-top:0">Mis pagos</h3><div id="myPaymentsList"></div></div>
@@ -1067,7 +1160,7 @@ async function renderMyPayments() {
 
 // Comprar: por ahora se habla directo por WhatsApp (el pago con PayPal está pausado).
 const COMPRAR_WHATSAPP = 'https://wa.me/18498153785?text=Hola%2C%20Me%20interesa%20comprar%20una%20suscripci%C3%B3n%20de%20la%20App%20Clip%20Viral';
-const PAYPAL_ACTIVO = false;
+const PAYPAL_ACTIVO = true; // comprar = PayPal (tarjeta); la compra por WhatsApp quedó apagada
 const SOPORTE_WHATSAPP = 'https://wa.me/18498153785?text=Hola%2C%20necesito%20ayuda%20con%20la%20App%20Clip%20Viral';
 function soporteWhatsapp() {
   api.openUrl(SOPORTE_WHATSAPP);
@@ -1093,7 +1186,7 @@ async function buyPlan(pl) {
       <p class="muted tiny">${renew ? `Se suma a tu plan actual (vence el ${fmtDate(p.expires)}).` : 'Tu plan se activa en cuanto se confirme el pago.'}
         Pagas con tarjeta de crédito o débito en la página segura de PayPal; no necesitas cuenta PayPal.${status.mode === 'sandbox' ? ' <b>(Modo de prueba: no se cobra de verdad)</b>' : ''}</p>
       <div id="payState" class="muted tiny"></div>`
-    : `<p>${link ? 'Te llevamos a la página de pago. Cuando se confirme, tu plan se activa en tu cuenta.' : 'Escríbenos para activar tu plan.'}</p>
+    : `<p>${link ? 'Te llevamos a la página de pago. Cuando se confirme, tu plan se activa en tu cuenta.' : 'El pago con tarjeta no está disponible en este momento. Intenta de nuevo más tarde.'}</p>
       <p class="muted tiny">Usa el mismo correo de tu cuenta: <b>${esc(S.user.email)}</b></p>`}
     ${S.info.supportContact ? `<p class="muted tiny">Soporte: ${esc(S.info.supportContact)}</p>` : ''}
     <div class="modal-actions"><button class="btn ghost" data-c>Cerrar</button>
@@ -1338,7 +1431,7 @@ function renderAjustes(el) {
         <p class="tiny" id="ckMsg" style="margin-top:8px"></p>
       </div>
 
-      ${S.cliente ? '' : `<div class="card" id="srvCard">
+      ${S.cliente || S.user?.role !== 'admin' ? '' : `<div class="card" id="srvCard">
         <h3>🖥️ Servidor de ClipViral</h3>
         <p class="muted tiny">Ahí están tu cuenta, tus redes conectadas y lo que programas. Con el de esta PC, lo programado se publica mientras la PC esté encendida. Con el de tu VPS, aunque la apagues.</p>
         <div class="setting"><div class="grow"><b id="srvNow">${esc(S.appInfo.serverUrl || '')}</b><small id="srvState">Revisando…</small></div></div>
@@ -1588,6 +1681,13 @@ async function checkUpdates(manual) {
   else if (manual) toast(info?.error || 'Tienes la última versión', info?.error ? 'bad' : 'ok');
 }
 setInterval(() => { if (S.user && !S.update?.available) checkUpdates(); }, 30 * 60 * 1000);
+// Si desde el panel te cambian el rol (administrador o no) o la membresía, la app se pone al día sola.
+setInterval(async () => {
+  if (!S.user || S.cliente) return;
+  const before = `${S.user.role}|${S.info?.publicar}`;
+  await refreshMe().catch(() => {});
+  if (S.user && before !== `${S.user.role}|${S.info?.publicar}`) { renderNav(); renderPage(false); toast(S.user.role === 'admin' ? 'Ahora tienes acceso de administrador.' : 'Tu acceso cambió.', 'ok', '🔑'); }
+}, 3 * 60 * 1000);
 
 function showUpdate(info) {
   if ($('.modal [data-upd]')) return;

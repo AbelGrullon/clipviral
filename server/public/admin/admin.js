@@ -301,36 +301,85 @@ function showFile() {
   if (m && !$('#releaseForm [name=version]').value) $('#releaseForm [name=version]').value = m[1];
 }
 
-$('#releaseForm').addEventListener('submit', (e) => {
+// El .zip para el botón "Descargar" de la web.
+const dropZip = $('#dropZip');
+const zipInput = dropZip.querySelector('input');
+['dragenter', 'dragover'].forEach((ev) => dropZip.addEventListener(ev, (e) => { e.preventDefault(); dropZip.classList.add('over'); }));
+['dragleave', 'drop'].forEach((ev) => dropZip.addEventListener(ev, (e) => { e.preventDefault(); dropZip.classList.remove('over'); }));
+dropZip.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) { zipInput.files = e.dataTransfer.files; showZip(); } });
+zipInput.addEventListener('change', showZip);
+function showZip() {
+  const f = zipInput.files[0];
+  $('#dropZipText').textContent = f ? `${f.name} · ${(f.size / 1048576).toFixed(1)} MB` : 'Descarga de la web (.zip)';
+  const m = f?.name.match(/(\d+\.\d+\.\d+)/);
+  if (m && !$('#releaseForm [name=version]').value) $('#releaseForm [name=version]').value = m[1];
+}
+
+/** Sube un archivo con barra de avance. */
+function subirArchivo(url, data, bar) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) bar.firstElementChild.style.width = `${(ev.loaded / ev.total) * 100}%`; };
+    xhr.onload = () => {
+      let body = {};
+      try { body = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body); else reject(new Error(body.error || 'No se pudo subir'));
+    };
+    xhr.onerror = () => reject(new Error('Error de conexión al subir'));
+    xhr.send(data);
+  });
+}
+
+$('#releaseForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
-  if (!fileInput.files[0]) return toast('Elige el instalador primero', 'bad');
-  const data = new FormData(form);
-  data.set('mandatory', form.mandatory.checked ? 'true' : 'false');
+  const exe = fileInput.files[0];
+  const zip = zipInput.files[0];
+  if (!exe && !zip) return toast('Elige el instalador (.exe), el .zip para la web, o los dos', 'bad');
+  const version = form.version.value.trim();
   const bar = $('#uploadProgress');
   bar.classList.remove('hidden');
   const btn = form.querySelector('button[type=submit]');
   btn.disabled = true;
-  const xhr = new XMLHttpRequest();
-  xhr.open('POST', '/api/admin/releases');
-  xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-  xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) bar.firstElementChild.style.width = `${(ev.loaded / ev.total) * 100}%`; };
-  xhr.onload = () => {
+  const hecho = [];
+  try {
+    if (exe) {
+      const data = new FormData();
+      data.set('version', version);
+      data.set('notes', form.notes.value);
+      data.set('mandatory', form.mandatory.checked ? 'true' : 'false');
+      data.set('file', exe);
+      await subirArchivo('/api/admin/releases', data, bar);
+      hecho.push('las apps la verán al abrirse');
+    }
+    if (zip) {
+      bar.firstElementChild.style.width = '0';
+      const data = new FormData();
+      data.set('version', version);
+      data.set('zip', zip);
+      await subirArchivo('/api/admin/descarga', data, bar);
+      hecho.push('la web ya descarga este .zip');
+    }
+    toast(`¡Listo! ${hecho.join(' y ')}.`);
+    form.reset(); showFile(); showZip();
+  } catch (err) {
+    toast(hecho.length ? `${err.message} (lo anterior sí se subió: ${hecho.join(' y ')})` : err.message, 'bad');
+  } finally {
     btn.disabled = false;
     bar.classList.add('hidden');
     bar.firstElementChild.style.width = '0';
-    let body = {};
-    try { body = JSON.parse(xhr.responseText); } catch {}
-    if (xhr.status >= 200 && xhr.status < 300) {
-      toast('¡Versión publicada! Los usuarios la verán al abrir la app.');
-      form.reset(); showFile(); loadReleases();
-    } else toast(body.error || 'No se pudo subir', 'bad');
-  };
-  xhr.onerror = () => { btn.disabled = false; toast('Error de conexión al subir', 'bad'); };
-  xhr.send(data);
+    loadReleases();
+  }
 });
 
 async function loadReleases() {
+  api('/admin/descarga').then(({ descarga: d }) => {
+    $('#webNow').innerHTML = d
+      ? `🌐 La web descarga ahora: <b>v${esc(d.version)}</b> · ${(d.size / 1048576).toFixed(1)} MB · ${d.downloads} descargas · <a href="/descargar" target="_blank">probar</a> · <a href="/" target="_blank">ver la web</a>`
+      : '🌐 La web todavía no tiene .zip para descargar: el botón "Descargar" dice que estará lista pronto.';
+  }).catch(() => {});
   const { releases } = await api('/admin/releases');
   $('#releases').innerHTML = releases.map((r) => `
     <div class="item">

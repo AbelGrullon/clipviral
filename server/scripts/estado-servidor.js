@@ -34,8 +34,8 @@ function listening() {
 export async function estado() {
   const h = await health();
   if (h?.ok === true) {
-    // api 3: publica solo lo programado. Uno anterior se cierra para abrir el nuevo.
-    if (!(Number(h.api) >= 3)) return 'viejo';
+    // api 4: busca la cámara del streamer (Cámara + juego). Uno anterior se cierra para abrir el nuevo.
+    if (!(Number(h.api) >= 4)) return 'viejo';
     return !h.copia || h.copia === mine ? 'nuevo' : 'otra';
   }
   return (await listening()) ? 'ocupado' : 'libre';

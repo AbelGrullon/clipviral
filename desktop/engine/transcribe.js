@@ -60,6 +60,118 @@ function parseWhisperJson(json) {
   return words;
 }
 
+// ---------- Tiempos precisos (DTW) ----------
+// El modo normal (-ml 1) da tiempos de palabra muy malos: muchas palabras amontonadas en el mismo instante o en el
+// segundo entero (frases hasta 10 s antes de tiempo). Con --dtw, whisper.cpp alinea cada pedazo de palabra con el audio.
+
+/** Nombre del modelo (ggml-small-q5_1.bin) → el "preset" que pide --dtw (small). null si no se conoce. */
+function dtwPreset(model) {
+  const m = path.basename(String(model || '')).match(/^ggml-(tiny|base|small|medium|large-v1|large-v2|large-v3-turbo|large-v3)(\.en)?(?:-q\d+_\d+)?\.bin$/i);
+  if (!m) return null;
+  return m[1].toLowerCase().replace(/-/g, '.') + (m[2] ? '.en' : '');
+}
+
+const SOLO_SIGNOS = /^[^\p{L}\p{N}]+$/u;
+const ABRE = /^[¿¡"«“(]+$/;
+const letras = (w) => w.replace(/[^\p{L}\p{N}]/gu, '').length;
+const normal = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+/**
+ * Palabras con los tiempos de DTW (salida -ojf: cada pedazo trae t_dtw en centésimas de segundo).
+ * duration: lo que dura el audio (ninguna palabra queda después). Devuelve null si la salida no trae DTW
+ * (entonces se usa el modo normal).
+ */
+function parseWhisperDtw(json, duration = Infinity) {
+  const items = Array.isArray(json?.transcription) ? json.transcription : [];
+  const raw = [];
+  let lastText = '';
+  items.forEach((seg, si) => {
+    const text = String(seg.text || '').trim();
+    if (!text || HALLUCINATIONS.test(text)) return;
+    // Whisper a veces repite la frase anterior entera (sobre todo al final del audio): es inventada.
+    const norm = normal(text);
+    if (norm && norm === lastText) return;
+    lastText = norm;
+    let cur = null;
+    for (const tk of seg.tokens || []) {
+      const piece = String(tk.text || '');
+      if (/^\s*\[_/.test(piece)) continue; // marcas internas de Whisper ([_BEG_], [_TT_150]...)
+      const t = Number(tk.t_dtw);
+      if (!Number.isFinite(t) || t < 0) { raw.length = 0; raw.noDtw = true; return; }
+      if (!cur || /^\s/.test(piece)) { cur = { s: t / 100, w: piece.trim(), seg: si }; raw.push(cur); } else cur.w += piece;
+    }
+  });
+  if (raw.noDtw) return null;
+  // Signos sueltos: "¿" va con la palabra que sigue, "?" "," "..." con la anterior; el guion de "cambio de persona" se va.
+  const words = [];
+  let prefix = '';
+  for (const r of raw) {
+    const w = r.w.trim();
+    if (!w || /^\[.*\]$/.test(w) || /^\(.*\)$/.test(w) || HALLUCINATIONS.test(w)) continue; // [Música], (risas)
+    if (SOLO_SIGNOS.test(w)) {
+      if (/^[-–—]+$/.test(w)) continue;
+      if (ABRE.test(w)) prefix += w;
+      else if (words.length) words[words.length - 1].w += w;
+      continue;
+    }
+    words.push({ s: Math.min(r.s, duration), w: prefix + w, seg: r.seg });
+    prefix = '';
+  }
+  // La primera palabra de una frase a veces queda segundos antes que la segunda (una pausa real de 2,5 s dentro de
+  // la misma frase es rara): se pone justo antes de ella.
+  words.forEach((x, k) => {
+    const next = words[k + 1];
+    const first = !k || words[k - 1].seg !== x.seg;
+    if (first && next && next.seg === x.seg && next.s - x.s > 2.5) x.s = Math.max(x.s, next.s - (0.1 + 0.07 * letras(x.w)));
+  });
+  for (let k = 1; k < words.length; k++) words[k].s = Math.max(words[k].s, words[k - 1].s);
+  // Varias palabras en el mismo instante: se reparten hasta la palabra siguiente según lo largas que son.
+  for (let i = 0; i < words.length;) {
+    let j = i + 1;
+    while (j < words.length && words[j].s - words[j - 1].s < 0.04) j++;
+    if (j - i >= 3) {
+      const total = words.slice(i, j).reduce((a, x) => a + letras(x.w) + 1, 0);
+      const limit = Math.min(words[j]?.s ?? Infinity, duration) - words[i].s;
+      const span = Math.max(0, Math.min(limit, total * 0.075));
+      let t = words[i].s;
+      for (let k = i; k < j; k++) { words[k].s = t; t += span * (letras(words[k].w) + 1) / total; }
+    }
+    i = j;
+  }
+  // Fin de cada palabra: hasta que empieza la siguiente, sin pasarse de lo que puede durar decirla.
+  return words.map((x, k) => {
+    const s = Math.min(x.s, Math.max(0, duration - 0.05));
+    const cap = s + Math.min(1.5, 0.15 + 0.08 * letras(x.w));
+    const e = Math.min(duration, Math.max(Math.min(words[k + 1]?.s ?? Infinity, cap), s + 0.05));
+    return { s: Number(s.toFixed(3)), e: Number(e.toFixed(3)), w: x.w };
+  });
+}
+
+// Qué sabe hacer el whisper-cli instalado (versiones viejas no traen --dtw o --no-flash-attn). Se pregunta una vez.
+const features = new Map();
+function whisperFeatures(whisper) {
+  if (!features.has(whisper)) {
+    features.set(whisper, run(whisper, ['--help'], { cwd: path.dirname(whisper), timeoutMs: 20000 })
+      .catch((err) => err)
+      .then((r) => {
+        const t = `${r?.out || ''}${r?.err || ''}`;
+        return { dtw: /--dtw\b/.test(t), nfa: /--no-flash-attn\b/.test(t) };
+      }));
+  }
+  return features.get(whisper);
+}
+
+/** Argumentos de whisper-cli: con tiempos precisos (DTW) si se puede, y los del modo normal de respaldo. */
+function whisperArgs({ model, wav, language, base, threads, useGpu, feats = {} }) {
+  const common = ['-m', model, '-f', wav, '-l', language, '-of', base, '-t', String(threads), '-np', ...(useGpu ? [] : ['-ng'])];
+  const preset = feats.dtw ? dtwPreset(model) : null;
+  return {
+    // DTW no funciona con "flash attention" (en las versiones nuevas viene encendida): se apaga.
+    precise: preset ? [...common, '-ojf', '--dtw', preset, ...(feats.nfa ? ['-nfa'] : [])] : null,
+    plain: [...common, '-oj', '-ml', '1', '-sow'],
+  };
+}
+
 /**
  * Transcribe un segmento de video. Devuelve { words, loudness, duration }.
  */
@@ -70,22 +182,29 @@ async function transcribeSegment({ ffmpeg, whisper, model, language = 'auto', us
   try {
     const loudness = loudnessPerSecond(wav);
     const threads = String(forcedThreads || Math.max(2, Math.min(8, os.cpus().length - 1)));
-    const args = ['-m', model, '-f', wav, '-l', language, '-oj', '-of', base, '-ml', '1', '-sow', '-t', threads, '-np'];
-    if (!useGpu) args.push('-ng');
+    const { precise, plain } = whisperArgs({ model, wav, language, base, threads, useGpu, feats: await whisperFeatures(whisper) });
+    const jsonFile = `${base}.json`;
+    const readJson = () => { try { return JSON.parse(fs.readFileSync(jsonFile, 'utf8')); } finally { fs.rmSync(jsonFile, { force: true }); } };
+    if (precise) {
+      try {
+        await run(whisper, precise, { cwd: path.dirname(whisper), timeoutMs: 20 * 60 * 1000 });
+        const words = parseWhisperDtw(readJson(), loudness.length || Infinity);
+        if (words) return { words, loudness, duration: loudness.length };
+      } catch {
+        // Si el modo preciso falla, se intenta con el de siempre.
+      }
+    }
     try {
-      await run(whisper, args, { cwd: path.dirname(whisper), timeoutMs: 20 * 60 * 1000 });
+      await run(whisper, plain, { cwd: path.dirname(whisper), timeoutMs: 20 * 60 * 1000 });
     } catch (err) {
       // Whisper falla con pedazos muy cortos (el final de un video): seguimos sin texto.
       if (loudness.length < 20) return { words: [], loudness, duration: loudness.length };
       throw err;
     }
-    const jsonFile = `${base}.json`;
-    const json = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
-    fs.rmSync(jsonFile, { force: true });
-    return { words: parseWhisperJson(json), loudness, duration: loudness.length };
+    return { words: parseWhisperJson(readJson()), loudness, duration: loudness.length };
   } finally {
     fs.rmSync(wav, { force: true });
   }
 }
 
-module.exports = { transcribeSegment, parseWhisperJson, loudnessPerSecond };
+module.exports = { transcribeSegment, parseWhisperJson, parseWhisperDtw, dtwPreset, whisperArgs, loudnessPerSecond };

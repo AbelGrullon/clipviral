@@ -116,9 +116,9 @@ test('estado del puerto: libre, este servidor, uno viejo, otra copia u otro prog
   const listen = (srv) => new Promise((r) => srv.listen(0, '127.0.0.1', () => r(srv.address().port)));
   const health = (body) => http.createServer((req, res) => res.end(JSON.stringify(body)));
   const servers = [
-    health({ ok: true, ai: false, api: 3, copia: idCopia(SERVER) }),
-    health({ ok: true, ai: true, api: 2, copia: idCopia(SERVER) }),
-    health({ ok: true, ai: false, api: 3, copia: 'de-otra-copia' }),
+    health({ ok: true, ai: false, api: 4, copia: idCopia(SERVER) }),
+    health({ ok: true, ai: true, api: 3, copia: idCopia(SERVER) }),
+    health({ ok: true, ai: false, api: 4, copia: 'de-otra-copia' }),
     net.createServer((s) => s.end()),
   ];
   const ports = [];

@@ -9,6 +9,7 @@ import adminRoutes from './routes/admin.js';
 import socialRoutes from './routes/social.js';
 import callbackRoutes from './routes/callbacks.js';
 import sitioRoutes from './routes/sitio.js';
+import webRoutes from './routes/web.js';
 import { serveRelay } from './relay.js';
 import { postRoutes, startPublisher, canPublish } from './publicaciones.js';
 import { aiEnabled } from './claude.js';
@@ -35,7 +36,7 @@ app.use(express.json({ limit: '3mb', verify: (req, res, buf) => { req.rawBody = 
 // copia: qué carpeta de ClipViral es (para no confundirse con otra copia abierta en la misma PC).
 // publica: el servidor sabe publicar solo lo programado (api 3).
 app.get('/api/health', (req, res) => res.json({
-  ok: true, ai: aiEnabled(), api: 3, copia: COPIA, publica: !CLIENTE && canPublish(), cliente: CLIENTE,
+  ok: true, ai: aiEnabled(), api: 4, copia: COPIA, publica: !CLIENTE && canPublish(), cliente: CLIENTE,
   // La app de administradores pide crear la cuenta mientras no haya ninguna.
   ...(ADMIN_APP ? { sinCuentas: !db.prepare('SELECT 1 FROM users').get() } : {}),
 }));
@@ -74,7 +75,10 @@ if (!CLIENTE) {
   app.use('/admin', express.static(path.join(ROOT, 'public', 'admin')));
   // Videos de paso para que Instagram los descargue (enlace difícil de adivinar, se borran en 24 h).
   app.get('/media/:name', serveRelay);
-  // Sitio público: inicio, privacidad, términos y borrar datos (los piden TikTok, Meta y Google).
+  // La web: inicio, compra con tarjeta y descarga del programa (más sus imágenes).
+  app.use('/web', express.static(path.join(ROOT, 'public', 'web'), { maxAge: '1d' }));
+  app.use('/', webRoutes);
+  // Páginas legales (privacidad, términos y borrar datos; las piden TikTok, Meta y Google) y la versión en inglés.
   app.use('/', sitioRoutes);
 }
 

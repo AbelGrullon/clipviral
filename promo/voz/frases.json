@@ -1,0 +1,152 @@
+{
+ "gancho_0": {
+  "voz": "¿Haces directos o subes videos largos?",
+  "sub": "¿Haces directos o subes videos largos?",
+  "dur": 2.298,
+  "sr": 24000
+ },
+ "gancho_1": {
+  "voz": "Tus mejores momentos se están perdiendo.",
+  "sub": "Tus mejores momentos se están perdiendo.",
+  "dur": 2.062,
+  "sr": 24000
+ },
+ "logo_0": {
+  "voz": "Con Clip Viral, se convierten en clips virales.",
+  "sub": "Con ClipViral, se convierten en clips virales.",
+  "dur": 2.876,
+  "sr": 24000
+ },
+ "quees_0": {
+  "voz": "Pegas el enlace de tu directo, o de tu video.",
+  "sub": "Pegas el enlace de tu directo o de tu video.",
+  "dur": 2.58,
+  "sr": 24000
+ },
+ "quees_1": {
+  "voz": "Clip Viral encuentra los mejores momentos, les pone subtítulos animados, y los deja en formato vertical.",
+  "sub": "ClipViral encuentra los mejores momentos, les pone subtítulos animados y los deja en vertical.",
+  "dur": 5.764,
+  "sr": 24000
+ },
+ "listos_0": {
+  "voz": "Listos para Tik Tok, Rils y Shorts.",
+  "sub": "Listos para TikTok, Reels y Shorts.",
+  "dur": 2.797,
+  "sr": 24000
+ },
+ "listos_1": {
+  "voz": "Y tus clips se guardan en tu computadora.",
+  "sub": "Y tus clips se guardan en tu PC.",
+  "dur": 2.283,
+  "sr": 24000
+ },
+ "planes_0": {
+  "voz": "Hay dos planes. Mira la diferencia.",
+  "sub": "Hay dos planes. Mira la diferencia.",
+  "dur": 2.058,
+  "sr": 24000
+ },
+ "local_0": {
+  "voz": "Plan Local: veinte dólares al mes.",
+  "sub": "Plan Local: 20 dólares al mes.",
+  "dur": 2.167,
+  "sr": 24000
+ },
+ "local_1": {
+  "voz": "Todo funciona en tu computadora, con el chat, el volumen y la inteligencia artificial local.",
+  "sub": "Todo funciona en tu PC: el chat, el volumen y la IA local.",
+  "dur": 5.165,
+  "sr": 24000
+ },
+ "local_2": {
+  "voz": "Sin límite de horas, y no necesitas clave de Clod.",
+  "sub": "Sin límite de horas. No necesitas clave de Claude.",
+  "dur": 2.966,
+  "sr": 24000
+ },
+ "claude_0": {
+  "voz": "Plan Clod: treinta dólares al mes.",
+  "sub": "Plan Claude: 30 dólares al mes.",
+  "dur": 2.35,
+  "sr": 24000
+ },
+ "claude_1": {
+  "voz": "Tiene todo lo del Local, y además,",
+  "sub": "Todo lo del Local, y además…",
+  "dur": 1.94,
+  "sr": 24000
+ },
+ "claude_2": {
+  "voz": "Clod lee todo el directo, y elige los momentos más virales, con título y hashtags.",
+  "sub": "Claude lee todo el directo y elige los momentos más virales, con título y hashtags.",
+  "dur": 4.946,
+  "sr": 24000
+ },
+ "clave_0": {
+  "voz": "Para este plan, pones tu propia clave de Clod en Ajustes.",
+  "sub": "Pones tu propia clave de Claude en Ajustes.",
+  "dur": 2.897,
+  "sr": 24000
+ },
+ "clave_1": {
+  "voz": "Lo que use Clod, se cobra en tu cuenta de Clod.",
+  "sub": "Lo que use Claude se cobra en tu cuenta de Claude.",
+  "dur": 2.613,
+  "sr": 24000
+ },
+ "resumen_0": {
+  "voz": "En resumen: en el plan Local, elige tu computadora.",
+  "sub": "En resumen: en el Local, elige tu PC.",
+  "dur": 3.406,
+  "sr": 24000
+ },
+ "resumen_1": {
+  "voz": "En el plan Clod, elige Clod.",
+  "sub": "En el Claude, elige Claude.",
+  "dur": 1.799,
+  "sr": 24000
+ },
+ "piloto_0": {
+  "voz": "Tus clips quedan guardados, listos para subir.",
+  "sub": "Tus clips quedan guardados, listos para subir.",
+  "dur": 2.957,
+  "sr": 24000
+ },
+ "piloto_1": {
+  "voz": "Y el Piloto vigila tus canales y te sugiere clips. Tú decides qué publicar.",
+  "sub": "El Piloto vigila tus canales y te sugiere clips. Tú decides qué publicar.",
+  "dur": 4.371,
+  "sr": 24000
+ },
+ "activar_0": {
+  "voz": "Activarlo es fácil.",
+  "sub": "Activarlo es fácil.",
+  "dur": 1.374,
+  "sr": 24000
+ },
+ "activar_1": {
+  "voz": "Copias el código de tu computadora, te mandamos una clave, y la pegas.",
+  "sub": "Copias el código de tu PC, te mandamos una clave y la pegas.",
+  "dur": 4.327,
+  "sr": 24000
+ },
+ "activar_2": {
+  "voz": "Cada clave da treinta días. Y si renuevas el mismo plan, los días se suman.",
+  "sub": "Cada clave da 30 días. Si renuevas el mismo plan, los días se suman.",
+  "dur": 4.6,
+  "sr": 24000
+ },
+ "cierre_0": {
+  "voz": "Compra por guatsap, al más uno, ocho cuatro nueve, ocho uno cinco, tres siete ocho cinco.",
+  "sub": "Compra por WhatsApp: +1 849 815 3785",
+  "dur": 6.204,
+  "sr": 24000
+ },
+ "cierre_1": {
+  "voz": "¿Tienes dudas? Toca el botón de Soporte, dentro de la app.",
+  "sub": "¿Tienes dudas? Toca el botón de Soporte dentro de la app.",
+  "dur": 3.022,
+  "sr": 24000
+ }
+}

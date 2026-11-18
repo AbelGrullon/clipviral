@@ -12,6 +12,7 @@ const { transcribeSegment } = require('./transcribe');
 const { makeClip } = require('./clipper');
 const localAi = require('./localai');
 const vista = require('./vista');
+const camara = require('./camara');
 const { merge: mergeSounds, describe: describeSound } = require('./sonido');
 const { judge } = require('./juez');
 const { SENSITIVITY } = require('./detector');
@@ -44,6 +45,7 @@ class ClipSession extends EventEmitter {
    *       outputDir, workRoot, paths (componentes), whisperModel, language, whisperGpu, gpuEncode,
    *       ollamaModel, api (llamadas al servidor), origin (piloto/manual), hints (lo que mejor funciona en tus redes)
    *       oido (detector de sonidos ya creado, o null), visionModel (modelo de Ollama que mira el video, o '')
+   *       camModel (modelo de Ollama para encontrar la cámara del streamer, en los dos modos), camStore (cámaras marcadas a mano)
    */
   constructor(opts) {
     super();
@@ -57,6 +59,9 @@ class ClipSession extends EventEmitter {
     this.lastPeakT = -Infinity;
     this.aiWindowStart = 0;
     this.aiSecondsUsed = null;
+    // Lo que va costando Claude en este directo (dólares que calcula el servidor con los tokens de cada consulta).
+    this.aiCost = 0;
+    this.aiCalls = 0;
     this.whisperGpu = this.o.whisperGpu;
     this.chatCount = 0;
   }
@@ -75,7 +80,18 @@ class ClipSession extends EventEmitter {
       chatMessages: this.chatCount,
       clips: this.clips.length,
       aiSecondsUsed: this.aiSecondsUsed,
+      aiCostUsd: this.aiCost,
+      aiCalls: this.aiCalls,
     };
+  }
+
+  /** Suma lo que costó una consulta a Claude y lo avisa a la pantalla. */
+  #addCost(usd) {
+    const v = Number(usd);
+    if (!Number.isFinite(v) || v < 0) return;
+    this.aiCost += v;
+    this.aiCalls += 1;
+    this.emitStats();
   }
 
   emitStats() { this.emit('stats', this.stats()); }
@@ -351,6 +367,7 @@ class ClipSession extends EventEmitter {
     }
     this.aiWindowStart = to;
     if (typeof scan.secondsUsed === 'number') this.aiSecondsUsed = scan.secondsUsed;
+    this.#addCost(scan.costUsd);
 
     const good = scan.candidates
       .filter((c) => c.score >= AI_MIN_SCORE && c.end > c.start && !this.#overlaps(c.start, c.end))
@@ -375,6 +392,7 @@ class ClipSession extends EventEmitter {
       this.log(`${err.message}`, 'warn');
       return;
     }
+    this.#addCost(picked.costUsd);
     for (const c of picked.clips) {
       let start = Math.max(ctxStart - 30, c.start);
       let end = Math.min(this.timeline.until, c.end);
@@ -395,11 +413,15 @@ class ClipSession extends EventEmitter {
     this.log(`✂️ Creando clip ${n}: "${title}"`);
     this.emit('producing', { title, start, end });
     try {
+      const segments = this.recorder.videoSegmentsFor
+        ? await this.#waitVideo(start, end)
+        : this.recorder.segmentsFor(start, end).filter((s) => !s.deleted);
+      // Cámara + juego: se busca la cámara del streamer en este momento (si no hay, el clip va con fondo).
+      const split = this.o.style === 'camara' && segments.length ? await this.#camSplit(start, end, segments) : null;
       const result = await makeClip({
         ffmpeg: this.o.paths.ffmpeg,
-        segments: this.recorder.videoSegmentsFor
-          ? await this.#waitVideo(start, end)
-          : this.recorder.segmentsFor(start, end).filter((s) => !s.deleted),
+        segments,
+        split,
         clip: { start, end, title, words: this.timeline.wordsBetween(start, end) },
         outFile,
         style: this.o.style,
@@ -434,6 +456,88 @@ class ClipSession extends EventEmitter {
         ? `No se pudo crear el clip "${title}": se canceló la descarga del video.`
         : `No se pudo crear el clip: ${err.message.slice(0, 300)}`, 'error');
     }
+  }
+
+  // ---------- Cámara + juego ----------
+  /** Dónde está la cámara del streamer en este tramo: la marcada a mano, la IA local o Claude (una vez por directo). */
+  async #camSplit(start, end, segments) {
+    const ffmpeg = this.o.paths.ffmpeg;
+    const times = [0.25, 0.5, 0.75].map((k) => Math.round((start + (end - start) * k) * 10) / 10);
+    const tempDir = path.join(this.workDir, 'camara');
+    try {
+      const video = await camara.measureVideo({ ffmpeg, segments, times, tempDir });
+      if (!video) return null;
+      if (video.h > video.w) { this.#camNote('vertical', '📷 Este video ya es vertical: va con el formato de siempre.'); return null; }
+      const manual = this.o.camStore?.get(this.info.channel) || null;
+      let box = manual;
+      if (!box) {
+        if (this.camLocal === undefined) this.camLocal = await camara.localCamModel(this.o.camModel);
+        if (this.camLocal) {
+          const found = await camara.findCamera({ ffmpeg, segments, times, tempDir, model: this.camLocal });
+          box = found.box;
+          if (found.b64) this.camShot = found.b64;
+        } else if (this.mode === 'ia' && this.o.api) {
+          // Con Claude se pregunta una sola vez por directo (cuesta centavos): los streamers no mueven la cámara.
+          if (this.camClaude === undefined) {
+            const found = await camara.findCamera({ ffmpeg, segments, times, tempDir,
+              askClaude: async (images) => {
+                const r = await this.o.api('/ai/camara', { images });
+                this.#addCost(r.costUsd);
+                return r.caja;
+              } });
+            this.camClaude = found.box;
+            if (found.b64) this.camShot = found.b64;
+          }
+          box = this.camClaude;
+        } else {
+          this.#camNote('sin-ia', '📷 Para "Cámara + juego" hace falta la IA que mira el video (en Ajustes) o el plan Claude. '
+            + 'También puedes marcar la cámara a mano con "Ajustar cámara". Mientras, los clips van con fondo.', 'warn');
+          return null;
+        }
+      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      if (!box) { this.log('📷 No vi la cámara del streamer en este momento: este clip va con fondo.'); return null; }
+      this.camBox = box;
+      this.#camNote('ok', manual ? '📷 Uso la cámara que marcaste para este canal: va arriba y el juego abajo.'
+        : '📷 Encontré la cámara del streamer: va arriba y el juego abajo. Si no quedó bien, toca "Ajustar cámara".', 'ok');
+      return camara.planSplit(box, video);
+    } catch (err) {
+      this.log(`📷 No pude ubicar la cámara (${err.message}). Este clip va con fondo.`, 'warn');
+      return null;
+    }
+  }
+
+  /** Avisa una sola vez por directo. */
+  #camNote(id, text, level) {
+    this.camNotes ||= new Set();
+    if (this.camNotes.has(id)) return;
+    this.camNotes.add(id);
+    this.log(text, level);
+  }
+
+  /** Para "Ajustar cámara": una foto del directo y la caja que se está usando. */
+  async camSnapshot() {
+    if (!this.info) throw new Error('El directo todavía no empezó. Espera unos segundos.');
+    const manual = this.o.camStore?.get(this.info.channel) || null;
+    let b64 = this.camShot || null;
+    if (!b64) {
+      let segs = [];
+      if (this.recorder?.videoSegmentsFor) {
+        if (!this.recorder.videoFile) throw new Error('Espera a que termine de bajar el video para marcar la cámara.');
+        segs = await this.recorder.videoSegmentsFor();
+      } else {
+        // El último pedazo puede estar a medio escribir: se usa el anterior.
+        const done = (this.recorder?.segments || []).filter((x) => !x.deleted && x.duration > 1);
+        segs = done.length > 1 ? [done[done.length - 2]] : done.slice(-1);
+      }
+      const seg = segs[segs.length - 1];
+      if (!seg) throw new Error('Todavía no hay video grabado. Espera unos segundos.');
+      const t = seg.start + Math.min(seg.duration / 2, 30);
+      const [f] = await vista.grabFrames({ ffmpeg: this.o.paths.ffmpeg, segments: [seg], times: [t], tempDir: path.join(this.workDir, 'camara'), width: 960 });
+      b64 = f?.b64 || null;
+    }
+    if (!b64) throw new Error('No pude sacar una foto del video.');
+    return { image: `data:image/jpeg;base64,${b64}`, box: manual || this.camBox || null, manual: !!manual, channel: this.info.channel };
   }
 
   async #waitVideo(start, end) {

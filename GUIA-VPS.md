@@ -1,126 +1,155 @@
-# ClipViral en tu VPS (para publicar con la PC apagada)
+# ClipViral en tu VPS (cviral.duckdns.org)
 
-Con el servidor de ClipViral en tu VPS, lo que programas se publica a su hora **aunque tu PC esté apagada**.
-Funciona igual que con el servidor en tu PC; la única diferencia es que el VPS está siempre encendido.
+Con ClipViral en tu VPS de Contabo tienes, en un solo lugar y siempre encendido:
 
-- **Lo que sigue en tu PC:** hacer los clips (bajar el directo, cortar, subtítulos) y programarlos.
-- **Lo que pasa al VPS:** tu cuenta, tus redes conectadas y la publicación a su hora.
+- **La web** `https://cviral.duckdns.org`: información, planes, compra con tarjeta y el botón **Descargar**.
+- **El panel de administración** `https://cviral.duckdns.org/admin/`:
+  - usuarios y membresías (dar días, cambiar plan, suspender, **hacer administrador**);
+  - pagos, correos, planes y precios;
+  - **Actualizaciones**: aquí subes el `.exe` de la actualización y el `.zip` de la web.
+- **El servidor de la app**: todas las cuentas viven aquí.
+  - Cada persona instala ClipViral, crea su cuenta y compra su plan.
+  - La app avisa sola cuando hay versión nueva y se actualiza desde la misma app.
+  - Si la cuenta es de administrador, la app muestra lo de administrador: **Agente**, **Claves de clientes**,
+    **Panel de administración** y, en Ajustes, la tarjeta **Servidor**.
+- **Lo programado se publica a su hora** aunque tu PC esté apagada.
 
-Al programar, la app manda el video al VPS. Cuando la publicación dice **📡 en el servidor**, ya puedes apagar la PC.
+Tu VPS ya tiene **Caddy** con otras páginas. ClipViral **no abre otro Caddy**: se agrega al tuyo.
+Tus otras páginas no se tocan, y antes de cambiar nada se guarda una copia de tu Caddyfile.
 
 ---
 
 ## Lo que necesitas
 
-- Tu VPS de Contabo con Windows Server. Contabo te mandó por correo su **IP**, el usuario (**Administrator**) y la contraseña.
-- Unos 20 minutos.
-- Recomendado: una **dirección con candado (https)**. Es gratis con DuckDNS y Caddy (paso 3). Sin candado también
-  funciona, pero tu contraseña y tus conexiones viajan sin cifrar: úsalo solo para probar.
+- Tu VPS de Contabo con Windows Server. Entras por Escritorio remoto, con el usuario **Administrator**.
+- La dirección **cviral.duckdns.org** apuntando a la IP del VPS:
+  - entra a [duckdns.org](https://www.duckdns.org);
+  - en `cviral` pon la IP del VPS en **current ip** → **update ip**.
+- Tu Caddy funcionando en el VPS, como ya lo tienes.
+- **Node.js** en el VPS: [nodejs.org](https://nodejs.org/es/download), el botón **LTS** (Siguiente, Siguiente…).
 
----
+## Paso 1. En tu PC: arma la copia del servidor
 
-## Paso 1. En tu PC: arma la copia
-
-1. Doble clic en **`Preparar copia para el VPS.bat`** (en la carpeta de ClipViral).
+1. Doble clic en **`Preparar copia para el VPS.bat`**.
 2. En tu escritorio aparece **`ClipViral para el VPS (PRIVADO).zip`**.
 
-La copia lleva el servidor y **tus datos**: tu cuenta, tu Facebook conectado y tu clave de Claude. Por eso es
-**privada**: no se la pases a nadie y bórrala al terminar.
+Lleva el servidor y **tus datos**: tu cuenta de administrador, tus redes conectadas y tu clave de Claude.
+Es **privada**: no se la pases a nadie y bórrala al terminar.
 
-## Paso 2. Entra al VPS y pasa la copia
+## Paso 2. Pásala al VPS
 
-1. En tu PC, abre **Conexión a Escritorio remoto** (búscalo en el menú Inicio).
-2. Escribe la IP del VPS → **Conectar** → usuario `Administrator` y la contraseña de Contabo.
-3. Copia el zip en tu PC (clic derecho → Copiar) y pégalo en el escritorio del VPS (clic derecho → Pegar).
-4. En el VPS: clic derecho en el zip → **Extraer todo** → escribe `C:\` → Extraer. Queda la carpeta `C:\ClipViral`.
-5. Instala **Node.js** en el VPS: [nodejs.org](https://nodejs.org/es/download), el botón **LTS** (Siguiente, Siguiente…).
+1. Abre **Conexión a Escritorio remoto** → la IP del VPS → usuario `Administrator`.
+2. Copia el zip de tu PC y pégalo en el escritorio del VPS.
+3. En el VPS: clic derecho en el zip → **Extraer todo** → escribe `C:\` → Extraer. Queda `C:\ClipViral`.
 
-> Si el navegador del VPS no te deja descargar, descarga el instalador en tu PC y pásalo al VPS igual que el zip.
-
-## Paso 3 (recomendado). Dirección con candado
-
-**La dirección (gratis):**
-
-1. Entra a [duckdns.org](https://www.duckdns.org) y entra con tu cuenta de Google.
-2. En **sub domain** escribe un nombre (por ejemplo `miclipviral`) → **add domain**.
-3. En **current ip** pon la IP de tu VPS → **update ip**.
-4. Tu dirección queda así: `miclipviral.duckdns.org`.
-
-**El candado (Caddy):**
-
-1. Entra a [caddyserver.com/download](https://caddyserver.com/download), elige **Windows amd64** → **Download**.
-2. En el VPS, crea la carpeta `C:\ClipViral\https`.
-3. Pon ahí el archivo que bajaste y cámbiale el nombre a **`caddy.exe`**.
-
-Caddy saca y renueva solo el certificado https. Usa los puertos 80 y 443 del VPS. El instalador los abre.
-
-## Paso 4. En el VPS: instala
+## Paso 3. En el VPS: instala
 
 1. En `C:\ClipViral`, clic derecho en **`Instalar en el VPS.bat`** → **Ejecutar como administrador**.
-2. Cuando pregunte la dirección, escribe la tuya (`miclipviral.duckdns.org`). Si no hiciste el paso 3, pulsa Enter.
-3. Al final te dice la dirección que vas a poner en la app, por ejemplo `https://miclipviral.duckdns.org`.
+2. Cuando pregunte la dirección, pulsa **Enter** (usa `cviral.duckdns.org`).
+3. Dice **"Encontré tu Caddy funcionando"** y pregunta si agrega ClipViral a tu Caddyfile: responde **S**.
+   - Agrega este bloque, marcado con `# ClipViral (inicio)` y `# ClipViral (fin)`:
+     ```
+     cviral.duckdns.org {
+         encode gzip
+         reverse_proxy 127.0.0.1:4600
+     }
+     ```
+   - Recarga tu Caddy (`caddy reload`). Si Caddy no acepta el cambio, deja tu Caddyfile como estaba.
+   - Si no encuentra tu Caddyfile, te pregunta dónde está. Si prefieres hacerlo tú, responde **n** y te muestra
+     el bloque para pegarlo a mano.
+4. Crea la tarea **ClipViral servidor**. Esa tarea:
+   - mantiene ClipViral encendido aunque cierres el Escritorio remoto;
+   - lo vuelve a encender si el VPS se reinicia.
+5. El servidor solo escucha dentro del VPS (`127.0.0.1:4600`): desde internet se entra por tu Caddy, con candado.
 
-El instalador:
+> **¿El puerto 4600 ya lo usa otra de tus páginas?** El instalador no la toca y te avisa.
+> Abre `C:\ClipViral\server\.env`, cambia `PORT=4600` por `PORT=4610` y vuelve a abrir el instalador.
 
-- trae tus datos;
-- crea la tarea **ClipViral servidor**, que mantiene el servidor encendido aunque cierres el Escritorio remoto y lo
-  vuelve a encender si el VPS se reinicia;
-- abre el firewall de Windows;
-- revisa que todo conteste.
+Al final te muestra la dirección de la web y la del panel. **Borra el zip PRIVADO** del VPS y de tu PC.
 
-Ya puedes cerrar el Escritorio remoto. **Borra el zip PRIVADO** del VPS y de tu PC.
+## Paso 4. En el panel: deja todo listo para vender
 
-## Paso 5. En tu PC: conecta la app al VPS
+Entra a `https://cviral.duckdns.org/admin/` con tu correo y contraseña de siempre.
 
-1. Abre ClipViral → **Ajustes** → **🖥️ Servidor de ClipViral**.
-2. Pega la dirección (`https://miclipviral.duckdns.org`) → **Probar**. Debe decir que tu VPS contesta y publica solo.
-3. **Usar mi VPS** → cierra y abre ClipViral.
+- **Pagos → PayPal**:
+  - pega tus claves de PayPal;
+  - prueba primero con **sandbox** (no cobra de verdad) y después cambia a **live**.
+  - La dirección de vuelta de PayPal (`https://cviral.duckdns.org`) ya la dejó puesta el instalador.
+- **Ajustes**:
+  - **Días de prueba gratis** para cuentas nuevas. Pon **0** si quieres que paguen antes de usarla.
+  - Tu contacto de **soporte**, que sale en la web y en la app.
+- **Planes y precios**: revisa los precios que salen en la web y en la app.
+- **Correos** (opcional): la bienvenida, los avisos de vencimiento y los pagos.
 
-Lo que ya tenías programado se pasa solo al VPS. En **Redes**, la tarjeta de Publicaciones dice
-*"Tu servidor está en tu VPS"*.
+## Paso 5. En tu PC: publica la app
+
+1. Doble clic en **`Publicar versión de ClipViral.bat`**. Lo primero que pide es la dirección: escribe
+   `cviral.duckdns.org` (la guarda para las próximas veces).
+2. Pulsa **Enter** para la versión que propone (por ejemplo 1.0.1). Cada vez que publicas, sube un número.
+3. Arma el instalador `ClipViral-Setup-1.0.1.exe` y el `.zip` para la web. Los deja en `desktop\dist-instalador`.
+   - Ese instalador ya viene conectado a tu VPS.
+4. Pregunta si lo sube. Responde **S**, escribe qué trae la versión, tu correo y tu contraseña de administrador.
+   - La contraseña no se ve al escribirla y no se guarda.
+5. Sube las dos cosas:
+   - la **actualización**: las apps instaladas avisan **"Nueva versión disponible"** y se actualizan con un clic;
+   - la **descarga de la web**: el botón **Descargar** de `https://cviral.duckdns.org` baja la versión nueva.
+
+También puedes subir los dos archivos a mano en el panel → **Actualizaciones** (arrastrar y soltar).
 
 ---
 
-## Cómo se usa
+## El día a día
 
-1. Programa como siempre (Crear publicación, o la publicación automática).
-2. Espera a que la publicación diga **📡 en el servidor**. Si el clip es largo y tu internet lento, puede tardar un minuto.
-3. Apaga la PC si quieres. A su hora, el VPS publica.
-4. Cuando vuelvas a abrir ClipViral, verás **Publicado** y el botón **Ver en Facebook / Instagram**.
+**Una persona nueva:**
 
-**Cancelar** y **Publicar ahora** también funcionan: la app se lo pide al VPS. Para eso hace falta internet.
+1. Descarga ClipViral desde tu web.
+2. Abre la app y crea su cuenta.
+3. Compra su plan con tarjeta, en la web (**Comprar**) o en la app (**Mi plan**). Se activa solo.
 
-## Preguntas
+**Alguien te paga directo a ti:**
 
-**¿Y si quiero volver a usar el servidor de mi PC?**
-Ajustes → Servidor de ClipViral → **Volver al de esta PC**. Lo programado se pasa a tu PC, que lo publica
-mientras esté encendida. Las redes conectadas se quedan en cada servidor: si conectaste algo nuevo en el VPS,
-conéctalo también en la PC.
+1. Entra al panel → **Usuarios**.
+2. Busca a esa persona → **Gestionar**.
+3. Usa **Registrar pago manual** o los botones **+1 mes**, **+90 días** y **+1 año**.
 
-**¿Puedo apagar el interruptor del servidor?**
-Sí: en Redes → Publicaciones, apaga **📡 Publicar desde el servidor**. Así la PC sube cada video a su hora y tiene
-que estar encendida.
+En la web y en la app no aparece nada sobre pagos a mano.
 
-**Actualizar ClipViral en el VPS**
+**Dar acceso de administrador:**
+
+1. En el panel → **Usuarios** → **Gestionar** → **Hacer admin**.
+2. En menos de 3 minutos, su app muestra lo de administrador sin cerrar nada.
+3. **Quitar admin** lo quita igual.
+
+**Membresías:** en **Usuarios** ves el plan de cada persona y hasta cuándo dura. Desde ahí puedes:
+
+- sumar días;
+- cambiar el plan;
+- suspender o reactivar.
+
+**Tu propia app:** instala el mismo `ClipViral-Setup` y entra con tu correo de administrador.
+
+- Tus amigos con la versión "Administrador" vieja deben hacer dos cosas:
+  - instalar el nuevo;
+  - crear su cuenta, y tú los haces admin en el panel.
+- Los `.bat` viejos `Empaquetar app para clientes/administradores` ya no hacen falta.
+
+## Actualizar el servidor del VPS
 
 1. En tu PC: `Preparar copia para el VPS.bat`.
 2. Copia el zip al VPS y descomprímelo en `C:\` encima de lo que hay (**Reemplazar**).
-3. Clic derecho en `Instalar en el VPS.bat` → Ejecutar como administrador.
+3. Clic derecho en `Instalar en el VPS.bat` → Ejecutar como administrador → Enter, Enter.
 
-Tus datos del VPS **no se reemplazan** con los de la copia.
+Tus datos del VPS no se reemplazan: usuarios, pagos, versiones y la descarga de la web. Tu Caddyfile
+tampoco se duplica: el bloque de ClipViral se cambia en su lugar.
 
-**No contesta**
+## Si algo no funciona
 
-- Revisa que en duckdns.org la dirección tenga la IP del VPS.
-- Mira los registros en el VPS:
-  - `C:\ClipViral\server\servidor.log` (el servidor);
-  - `C:\ClipViral\https\caddy.log` (el candado).
-- Vuelve a abrir `Instalar en el VPS.bat` como administrador: apaga lo viejo y enciende todo de nuevo.
-- Si el VPS tiene IIS u otro programa en el puerto 80, Caddy no puede sacar el certificado. Ciérralo o pide ayuda.
-
-**¿Es seguro?**
-
-- **Usa https** (paso 3).
-- **Usa una contraseña fuerte** para el VPS y para tu cuenta de ClipViral.
-- Tus tokens van cifrados en el VPS, igual que en tu PC.
-- El servidor solo deja entrar a tu cuenta.
+- **La web no abre:**
+  - revisa que en duckdns.org `cviral` tenga la IP del VPS;
+  - abre tu Caddyfile y revisa que esté el bloque de ClipViral.
+- **Registros en el VPS:**
+  - `C:\ClipViral\server\servidor.log`: ClipViral;
+  - el log de tu Caddy: el certificado.
+- **Volver a tu Caddyfile de antes:** está guardado como `Caddyfile.antes-de-clipviral.bak`, al lado del tuyo.
+- **Reiniciar todo:** vuelve a abrir `Instalar en el VPS.bat` como administrador. Apaga solo lo de ClipViral y lo
+  vuelve a encender.

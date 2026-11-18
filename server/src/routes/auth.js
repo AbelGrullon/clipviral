@@ -28,14 +28,19 @@ router.post('/register', limiter, async (req, res) => {
   // Versión para administradores: solo se crea una cuenta (la del dueño de esa PC) y es administrador.
   const adminApp = process.env.EDICION === 'admin';
   if (adminApp && db.prepare('SELECT 1 FROM users').get()) return res.status(403).json({ error: 'Esta copia ya tiene su administrador. Entra con tu correo y contraseña.' });
-  const days = Number(getSetting('trial_days', '3')) || 3;
+  // Días de prueba al crear la cuenta (Panel → Ajustes). 0 = sin prueba: hay que comprar un plan para usar la app.
+  const rawDays = Number(getSetting('trial_days', '3'));
+  const days = Number.isFinite(rawDays) && rawDays >= 0 ? rawDays : 3;
   const expires = cliente ? null : new Date(Date.now() + days * 86400000).toISOString();
+  // Servidor nuevo (por ejemplo el VPS recién instalado): la primera cuenta que se crea es la del administrador.
+  const primera = !cliente && !adminApp && !db.prepare('SELECT 1 FROM users').get();
   const passHash = await hashPassword(password);
   const result = db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan, plan_expires, last_login)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`).run(email, name, passHash, adminApp ? 'admin' : 'user', cliente || adminApp ? 'pro' : 'trial', adminApp ? null : expires);
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`).run(email, name, passHash, adminApp || primera ? 'admin' : 'user',
+    cliente || adminApp || primera ? 'pro' : 'trial', adminApp || primera ? null : expires);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
   const token = createSession(user.id, req.body?.device);
-  if (!cliente && !adminApp && mailConfig().auto.bienvenida) sendMail(user, 'bienvenida', { trialDays: days }).catch(() => {});
+  if (!cliente && !adminApp && !primera && days > 0 && mailConfig().auto.bienvenida) sendMail(user, 'bienvenida', { trialDays: days }).catch(() => {});
   res.status(201).json({ token, user: publicUser(user) });
 });
 

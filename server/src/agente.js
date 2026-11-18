@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import { db, getSetting, setSetting } from './db.js';
 import { requireAdmin } from './auth.js';
-import { getClient, withKey, aiErrorMessage, costOf, OPUS } from './claude.js';
+import { getClient, withKey, aiErrorMessage, costOf, OPUS, cut } from './claude.js';
 import { keyForUser } from './clave.js';
 import { open } from './secretbox.js';
 
@@ -132,8 +132,8 @@ router.post('/pensar', async (req, res) => {
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
         output_config: { effort, ...(schema ? { format: { type: 'json_schema', schema } } : {}) },
-        ...(system ? { system } : {}),
-        messages: [{ role: 'user', content: prompt }],
+        ...(system ? { system: cut(system) } : {}),
+        messages: [{ role: 'user', content: cut(prompt) }],
       });
     });
     const model = response.model || OPUS;

@@ -203,9 +203,11 @@ payRoutes.get('/mios', requireAuth, (req, res) => {
 });
 
 const page = (title, text, ok) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head>
-<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0f0b1a;color:#ece9f5;font-family:Arial,Helvetica,sans-serif">
-<div style="max-width:420px;padding:32px;text-align:center;background:#1a1430;border-radius:18px"><div style="font-size:54px">${ok ? '✅' : '⚠️'}</div>
-<h1 style="font-size:22px">${title}</h1><p style="color:#b9b2d0;line-height:1.5">${text}</p><p style="color:#8f88a8;font-size:13px">Ya puedes volver a ClipViral.</p></div></body></html>`;
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#fff;font-family:Arial,Helvetica,sans-serif">
+<div style="max-width:420px;padding:32px;text-align:center;background:#08142f;border:1px solid rgba(120,150,255,.16);border-radius:18px"><div style="font-size:54px">${ok ? '✅' : '⚠️'}</div>
+<h1 style="font-size:22px">${title}</h1><p style="color:#b9b2d0;line-height:1.5">${text}</p><p style="color:#8f88a8;font-size:13px">Ya puedes volver a ClipViral: entra con tu correo y verás tu plan.</p>
+<p style="margin-top:18px"><a href="/#descargar" style="display:inline-block;padding:11px 18px;border-radius:10px;background:#e5161d;color:#fff;text-decoration:none;font-weight:700">Descargar ClipViral</a>
+<a href="/" style="display:inline-block;padding:11px 18px;color:#b9b2d0">Ir a la web</a></p></div></body></html>`;
 
 /** PayPal manda aquí al cliente después de pagar: se cobra y se activa el plan. */
 payRoutes.get('/vuelta', async (req, res) => {

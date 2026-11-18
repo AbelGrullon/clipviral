@@ -11,6 +11,7 @@ import { PROVIDERS, redirectUri } from '../social.js';
 import { socialChecklist } from '../checklist.js';
 import { mailConfig, saveMailConfig, sendMail, mailEnabled } from '../correo.js';
 import { paypalConfig, savePaypalConfig, testPaypal, paymentsEnabled, MONTH_DAYS } from '../pagos.js';
+import { descargaInfo, guardarDescarga, borrarDescarga } from '../descarga.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -279,6 +280,23 @@ router.post('/releases', upload.single('file'), async (req, res) => {
       req.body?.mandatory === 'true' || req.body?.mandatory === '1' ? 1 : 0);
   res.status(201).json({ ok: true });
 });
+
+// El .zip para el botón "Descargar ClipViral" de la web.
+router.get('/descarga', (req, res) => res.json({ descarga: descargaInfo() }));
+router.post('/descarga', upload.single('zip'), async (req, res, next) => {
+  const file = req.file;
+  try {
+    const version = String(req.body?.version || '').trim().replace(/^v/i, '') || (file?.originalname.match(/(\d+\.\d+\.\d+)/) || [])[1] || '';
+    if (!file) return res.status(400).json({ error: 'Sube el .zip para la web' });
+    if (!/\.zip$/i.test(file.originalname)) { fs.rmSync(file.path, { force: true }); return res.status(400).json({ error: 'Para la web sube un archivo .zip' }); }
+    if (!VERSION_RE.test(version)) { fs.rmSync(file.path, { force: true }); return res.status(400).json({ error: 'Pon la versión (formato 1.2.3)' }); }
+    res.status(201).json({ descarga: await guardarDescarga(file.path, { version, originalName: file.originalname }) });
+  } catch (err) {
+    if (file) fs.rmSync(file.path, { force: true });
+    next(err);
+  }
+});
+router.delete('/descarga', (req, res) => { borrarDescarga(); res.json({ ok: true }); });
 
 router.delete('/releases/:id', (req, res) => {
   const release = db.prepare('SELECT * FROM releases WHERE id = ?').get(Number(req.params.id));

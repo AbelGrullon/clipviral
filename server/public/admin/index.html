@@ -142,13 +142,23 @@
       <!-- Actualizaciones -->
       <div class="tab hidden" data-tab="versiones">
         <header class="tab-head"><h1>Actualizaciones</h1></header>
+        <p class="muted">Lo más fácil: en tu PC abre <b>Publicar versión de ClipViral.bat</b>. Arma el instalador y sube las dos cosas solo. Aquí lo puedes hacer a mano.</p>
         <form id="releaseForm" class="card upload">
-          <label id="drop" class="drop">
-            <input type="file" name="file" accept=".exe" hidden />
-            <span class="drop-icon">⬆️</span>
-            <strong id="dropText">Arrastra aquí el instalador (.exe) o haz clic</strong>
-            <small class="muted">Se genera con: npm run instalador (carpeta desktop)</small>
-          </label>
+          <div class="drops">
+            <label id="drop" class="drop">
+              <input type="file" name="file" accept=".exe" hidden />
+              <span class="drop-icon">🚀</span>
+              <strong id="dropText">Actualización para las apps (.exe)</strong>
+              <small class="muted">Arrastra aquí ClipViral-Setup-X.Y.Z.exe o haz clic. Las apps instaladas avisan y se actualizan solas.</small>
+            </label>
+            <label id="dropZip" class="drop">
+              <input type="file" name="zip" accept=".zip" hidden />
+              <span class="drop-icon">🌐</span>
+              <strong id="dropZipText">Descarga de la web (.zip)</strong>
+              <small class="muted">Arrastra aquí el .zip con el instalador. Es lo que baja el botón "Descargar" de tu web.</small>
+            </label>
+          </div>
+          <p class="muted tiny" id="webNow" style="margin:6px 0 0"></p>
           <div class="row">
             <label>Versión<input name="version" placeholder="1.0.1" required pattern="v?\d+\.\d+\.\d+" /></label>
             <label class="check"><input type="checkbox" name="mandatory" /> Obligatoria</label>

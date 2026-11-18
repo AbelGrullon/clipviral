@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 delete process.env.ANTHROPIC_API_KEY;
-const { PICK_SCHEMA, NETWORKS } = await import('../src/claude.js');
+const { PICK_SCHEMA, NETWORKS, cut } = await import('../src/claude.js');
 const { cleanPickedClip, cleanRedes, cleanTags } = await import('../src/textos.js');
 
 test('el formato que se le pide a Claude incluye el texto de las 4 redes y es válido', () => {
@@ -44,4 +44,18 @@ test('limpia lo que devuelve Claude antes de mandarlo a la app', () => {
   assert.equal(cleanPickedClip({ start: 50, end: 40 }), null, 'segundos al revés: se descarta');
   assert.equal(cleanRedes(null), null);
   assert.equal(cleanTags(Array.from({ length: 20 }, (_, i) => `t${i}`)).length, 8);
+});
+
+test('un emoji partido al recortar no rompe la consulta a Claude', () => {
+  const chat = 'jajaja 😂😂 qué locura';
+  // Recortar en 8 caería justo en medio del primer 😂 (cada emoji ocupa 2 "letras" en JavaScript).
+  assert.equal(chat.slice(0, 8).isWellFormed(), false, 'así fallaba antes');
+  assert.equal(cut(chat, 8), 'jajaja ');
+  assert.equal(cut(chat, 9), 'jajaja 😂');
+  assert.equal(cut(chat, 200), chat);
+  // Medio emoji que ya venía roto del chat o de la transcripción se reemplaza.
+  const roto = `hola ${'😂'[0]} chau`;
+  assert.equal(cut(roto).isWellFormed(), true);
+  assert.doesNotMatch(JSON.stringify({ content: cut(roto) }), /\ud[89ab]/i, 'en el JSON que va a Claude no queda medio emoji');
+  assert.equal(cut(null, 10), '');
 });

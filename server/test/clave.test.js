@@ -84,7 +84,7 @@ test('sin clave: la IA está apagada y el admin ve qué falta', async () => {
   const health = await call('GET', '/health', null, null);
   assert.equal(health.body.ok, true);
   assert.equal(health.body.ai, false);
-  assert.equal(health.body.api, 3);
+  assert.equal(health.body.api, 4);
   assert.equal(health.body.publica, true);
   assert.match(health.body.copia, /^[0-9a-f]{12}$/);
   const st = await call('GET', '/admin/claude');

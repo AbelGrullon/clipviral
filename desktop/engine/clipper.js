@@ -14,7 +14,8 @@ const LOGO_POS = {
 
 /**
  * Arma el filtro de FFmpeg.
- * style: 'blur' | 'recorte' | 'horizontal' · opts: { subs, logo, fps, quality, zoom }
+ * style: 'blur' | 'recorte' | 'horizontal' | 'camara' · opts: { subs, logo, fps, quality, zoom, split }
+ * 'camara' (cámara + juego): split = { camCrop, camH, gameCrop, gameH } (de camara.planSplit), en píxeles del video.
  * Efectos: mirror (espejo), bgInput (n.º de entrada de la imagen de fondo), cut (partes que se quedan), speed.
  */
 function videoFilter(style, withSubs, opts = {}) {
@@ -27,9 +28,18 @@ function videoFilter(style, withSubs, opts = {}) {
   // El espejo va antes de todo: así los subtítulos, el título y el logo NO salen al revés.
   const src = `[0:v]fps=${fps},${opts.mirror ? 'hflip,' : ''}`;
   // Fondo propio: una imagen que cubre todo el cuadro, en lugar del fondo borroso o las franjas negras.
-  const bg = Number.isInteger(opts.bgInput) && style !== 'recorte'
+  const bg = Number.isInteger(opts.bgInput) && style !== 'recorte' && style !== 'camara'
     ? `[${opts.bgInput}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=${fps}[bg]` : '';
-  if (bg) {
+  if (style === 'camara' && opts.split) {
+    // Cámara arriba y juego abajo: se recorta cada parte del video original y se apilan.
+    // El espejo va después del recorte (las medidas son del video sin voltear).
+    const { camCrop: c, camH, gameCrop: g, gameH } = opts.split;
+    const flip = opts.mirror ? 'hflip,' : '';
+    parts.push(`[0:v]fps=${fps},split=2[cm][gm]`,
+      `[cm]crop=${c.w}:${c.h}:${c.x}:${c.y},${flip}scale=${W}:${camH}:force_original_aspect_ratio=increase,crop=${W}:${camH},setsar=1[top]`,
+      `[gm]crop=${g.w}:${g.h}:${g.x}:${g.y},${flip}scale=${W}:${gameH},setsar=1[bot]`,
+      '[top][bot]vstack=inputs=2,setsar=1[b0]');
+  } else if (bg) {
     const fit = style === 'horizontal' ? `scale=${W}:${H}:force_original_aspect_ratio=decrease` : `scale=${Math.round(W * zoom / 2) * 2}:-2`;
     parts.push(bg, `${src}${fit}[fg]`, `[bg][fg]overlay=(W-w)/2:(H-h)/2:shortest=1,crop=${W}:${H},setsar=1[b0]`);
   } else if (style === 'horizontal') {
@@ -67,8 +77,27 @@ function videoFilter(style, withSubs, opts = {}) {
  * segments: pedazos que cubren el clip [{ file, start, duration }]
  * look: opciones de estilo (subtítulos, título arriba, marca de agua, logo, calidad, fps, zoom)
  */
-async function makeClip({ ffmpeg, segments, clip, outFile, style = 'blur', subtitles = true, look = {}, gpuEncode = false, tempDir }) {
+/**
+ * Cámara + juego: los subtítulos van más chicos y abajo, dentro del recuadro de la cámara (así no tapan el juego).
+ * Se ajusta el estilo "Viral" que arma subtitles.js: tamaño, borde, alineación (2 = abajo al centro) y margen de abajo.
+ */
+const CAM_SUB_SCALE = 0.68;
+function subsInCam(ass, camH, H = 1920) {
+  return ass.replace(/^Style: Viral,.*$/m, (line) => {
+    const f = line.split(',');
+    const size = Math.round(Number(f[2]) * CAM_SUB_SCALE);
+    f[2] = String(size);
+    f[16] = String(Math.max(2, Math.round(size / 12)));
+    f[18] = '2';
+    f[21] = String(H - camH + Math.round(camH * 0.06));
+    return f.join(',');
+  });
+}
+
+async function makeClip({ ffmpeg, segments, clip, outFile, style = 'blur', subtitles = true, look = {}, gpuEncode = false, tempDir, split = null }) {
   if (!segments.length) throw new Error('No hay video grabado para ese momento');
+  // Cámara + juego sin cámara encontrada: va con fondo, como siempre.
+  if (style === 'camara' && !split) style = 'blur';
   fs.mkdirSync(tempDir, { recursive: true });
   const listFile = path.join(tempDir, 'lista.txt');
   fs.writeFileSync(listFile, segments.map((s) => `file '${s.file.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
@@ -82,12 +111,13 @@ async function makeClip({ ffmpeg, segments, clip, outFile, style = 'blur', subti
   const watermark = look.watermark?.text ? look.watermark : null;
   const withAss = rel.length > 0 || !!banner || !!watermark;
   if (withAss) {
-    fs.writeFileSync(path.join(tempDir, 'subs.ass'), buildAss(rel, {
+    const ass = buildAss(rel, {
       ...look.subs,
       layout: style === 'horizontal' ? 'horizontal' : 'vertical',
       titleBanner: banner,
       watermark,
-    }, duration));
+    }, duration);
+    fs.writeFileSync(path.join(tempDir, 'subs.ass'), style === 'camara' ? subsInCam(ass, split.camH) : ass);
   }
   const logo = look.logo?.file && fs.existsSync(look.logo.file) ? look.logo : null;
   // -ss antes de -i: salta directo al momento (mucho más rápido que decodificar desde el inicio).
@@ -111,8 +141,8 @@ async function makeClip({ ffmpeg, segments, clip, outFile, style = 'blur', subti
     }
   }
   const finalDuration = (cut ? efectos.keptSeconds(cut) : duration) / fx.velocidad;
-  const bgInput = fx.fondo ? (logo ? 2 : 1) : null;
-  const video = videoFilter(style, withAss, { logo, fps: look.fps, quality: look.quality, zoom: look.zoom, mirror: fx.espejo, bgInput, cut, speed: fx.velocidad });
+  const bgInput = fx.fondo && style !== 'camara' ? (logo ? 2 : 1) : null;
+  const video = videoFilter(style, withAss, { logo, fps: look.fps, quality: look.quality, zoom: look.zoom, mirror: fx.espejo, bgInput, cut, speed: fx.velocidad, split });
   const filter = audio ? `${video};${audio}` : video;
 
   const encode = async (gpu) => {
@@ -144,4 +174,4 @@ async function makeClip({ ffmpeg, segments, clip, outFile, style = 'blur', subti
   return { file: outFile, thumb: fs.existsSync(thumb) ? thumb : null, duration: finalDuration };
 }
 
-module.exports = { makeClip, videoFilter };
+module.exports = { makeClip, videoFilter, subsInCam, CAM_SUB_SCALE };

@@ -8,6 +8,7 @@ const { ClipSession, ytdlpProblem } = require('./engine/session');
 const localAi = require('./engine/localai');
 const { Oido } = require('./engine/sonido');
 const vista = require('./engine/vista');
+const { CamStore } = require('./engine/camara');
 const { checkSystem, findOllama, freeSpace } = require('./engine/requisitos');
 const perf = require('./engine/rendimiento');
 const { UploadQueue } = require('./engine/subidas');
@@ -33,6 +34,10 @@ const CLIENTE = EDICION === 'cliente';
 // las redes para volver después de conectar) y la primera vez se crea la cuenta de administrador.
 const ADMIN_APP = EDICION === 'admin';
 const INTERNO = CLIENTE || ADMIN_APP;
+// Instalador único (el que se descarga y se actualiza desde tu VPS): todos entran con su cuenta en el servidor central.
+// La dirección se pone al empaquetar ("Empaquetar ClipViral.bat" → extraMetadata.servidorCentral).
+const CENTRAL = INTERNO ? '' : String(require('./package.json').servidorCentral || appConfig.servidorCentral
+  || (!app.isPackaged && process.env.CLIPVIRAL_CENTRAL) || '').trim().replace(/\/+$/, '');
 // En desarrollo se puede probar en otro puerto (para no chocar con el servidor que ya tengas encendido).
 const ADMIN_PORT = (!app.isPackaged && Number(process.env.CLIPVIRAL_PUERTO)) || 4600;
 
@@ -59,6 +64,8 @@ const files = {
 };
 // Cookies de YouTube (Ajustes): cuando YouTube pide confirmar que no eres un robot, yt-dlp entra con tu sesión.
 const COOKIES_FILE = path.join(userData, 'youtube-cookies.txt');
+// Cámara + juego: las cámaras marcadas a mano, por canal.
+const camStore = new CamStore(path.join(userData, 'camaras.json'));
 const COOKIE_BROWSERS = ['edge', 'chrome', 'firefox', 'brave'];
 function cookieArgs() {
   const c = getSettings().ytCookies;
@@ -213,6 +220,8 @@ const getSettings = () => {
 function serverUrl() {
   if (CLIENTE) return `http://127.0.0.1:${localPort}`;
   const saved = String(getSettings().serverUrl || '').trim();
+  // Instalador único: siempre el servidor central (un administrador puede elegir otro remoto en Ajustes).
+  if (CENTRAL) return (saved && !isLocalUrl(saved) ? saved : CENTRAL).replace(/\/+$/, '');
   // Versión de administradores: el servidor de adentro, salvo que hayas elegido tu VPS en Ajustes.
   if (ADMIN_APP && !(saved && !isLocalUrl(saved))) return `http://localhost:${localPort || ADMIN_PORT}`;
   // Si elegiste tu VPS, se usa ese aunque el .bat haya encendido el servidor de esta PC.
@@ -255,6 +264,16 @@ function freePort() {
     srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
   });
 }
+/** ¿Hay algo escuchando en ese puerto de esta PC? */
+function portBusy(port) {
+  return new Promise((resolve) => {
+    const s = require('node:net').connect({ port, host: '127.0.0.1' });
+    s.setTimeout(1500);
+    s.once('connect', () => { s.destroy(); resolve(true); });
+    s.once('timeout', () => { s.destroy(); resolve(false); });
+    s.once('error', () => resolve(false));
+  });
+}
 function startLocalServer() {
   if (serverReady) return serverReady;
   serverReady = (async () => {
@@ -264,6 +283,7 @@ function startLocalServer() {
       if (h?.ok) { localPort = ADMIN_PORT; return; }
     }
     const port = ADMIN_APP ? ADMIN_PORT : await freePort();
+    if (ADMIN_APP && await portBusy(port)) throw new Error(`el puerto ${port} lo está usando otro programa. Reinicia la PC y vuelve a abrir ClipViral`);
     const dataDir = path.join(userData, 'servidor');
     fs.mkdirSync(dataDir, { recursive: true });
     const log = fs.openSync(path.join(userData, 'servidor.log'), 'a');
@@ -276,7 +296,7 @@ function startLocalServer() {
     await new Promise((resolve, reject) => {
       const t = setTimeout(() => { child.kill(); reject(new Error('tardó demasiado en arrancar')); }, 30000);
       child.on('message', (m) => { if (m?.listo) { clearTimeout(t); resolve(); } });
-      child.once('exit', (code) => { clearTimeout(t); reject(new Error(`se cerró (código ${code}). Mira servidor.log`)); });
+      child.once('exit', (code) => { clearTimeout(t); reject(new Error(`se cerró (código ${code}). El detalle está en ${path.join(userData, 'servidor.log')}`)); });
     });
     // Si se cae más tarde, la próxima consulta lo vuelve a encender.
     child.once('exit', () => { if (localServer === child) { localServer = null; serverReady = null; } });
@@ -1051,6 +1071,7 @@ ipcMain.handle('agente:ver', async (e, file) => {
 // ---------- App ----------
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(), gpu, serverUrl: serverUrl(), userData, edicion: CLIENTE ? 'cliente' : ADMIN_APP ? 'admin' : 'completa',
+  central: !!CENTRAL,
   // "Claves de clientes" solo aparece en la PC que tiene tu clave privada.
   generaClaves: !CLIENTE && fs.existsSync(path.join(LICENCIAS_DIR, 'clave-privada.pem')),
 }));
@@ -1104,9 +1125,12 @@ ipcMain.handle('auth:session', async () => {
   if (!token()) {
     // Versión de administradores: si todavía no hay cuenta, la app pide crear la del administrador.
     if (ADMIN_APP) {
-      try { await startLocalServer(); } catch {}
+      try { await startLocalServer(); } catch (err) {
+        return { error: `No se pudo encender ClipViral por dentro: ${err.message}.`, offline: true };
+      }
       const h = await fetch(`${serverUrl()}/api/health`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json()).catch(() => null);
-      return h?.sinCuentas ? { crearAdmin: true } : null;
+      if (!h?.ok) return { error: 'ClipViral no respondió por dentro. Ciérralo y vuelve a abrirlo.', offline: true };
+      return h.sinCuentas ? { crearAdmin: true } : null;
     }
     return null;
   }
@@ -1435,6 +1459,8 @@ async function startSession(opts, origin = null) {
     // Oído (si está bajado) en los dos modos: ayuda a encontrar momentos. Los ojos, solo en modo Local.
     oido: s.oido !== false && oido.installed() ? oido : null,
     visionModel: s.mode === 'local' ? s.visionModel : '',
+    // Para "Cámara + juego" se usa la IA local en los dos modos (es gratis); si no está, Claude en el plan Claude.
+    camModel: s.visionModel || '', camStore,
     // Si no puede abrir el enlace, actualiza yt-dlp (aunque se haya revisado hace poco) y prueba otra vez.
     updateYtdlp: () => components.updateYtdlp(true),
     // Lo que mejor le funciona a tus redes se le pasa a Claude para elegir y titular los clips.
@@ -1480,6 +1506,13 @@ async function startSession(opts, origin = null) {
 }
 ipcMain.handle('engine:stop', () => { session?.stop(); });
 ipcMain.handle('engine:state', () => (session ? { stats: session.stats(), logs: sessionLogs } : null));
+// Cámara + juego: foto del directo con la cámara que se está usando, y guardar la que marques a mano (por canal).
+ipcMain.handle('camara:foto', async () => {
+  if (!session) throw new Error('Empieza un directo o video para marcar la cámara.');
+  return session.camSnapshot();
+});
+ipcMain.handle('camara:guardar', (e, { channel, box }) => { camStore.set(channel, box || null); return camStore.list(); });
+ipcMain.handle('camara:lista', () => camStore.list());
 
 // ---------- Clips ----------
 ipcMain.handle('clips:list', () => readJson(files.clips, []).filter((c) => fs.existsSync(c.file)));

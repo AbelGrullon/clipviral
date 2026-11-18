@@ -1,7 +1,7 @@
 // Limpia lo que devuelve Claude al elegir clips, antes de mandarlo a la app.
-import { NETWORKS } from './claude.js';
+import { NETWORKS, cut } from './claude.js';
 
-const clean = (text, max) => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+const clean = (text, max) => cut(String(text ?? '').replace(/\s+/g, ' ').trim(), max);
 
 /** Hashtags como #palabra, sin espacios ni repetidos. */
 export function cleanTags(list, max = 8) {

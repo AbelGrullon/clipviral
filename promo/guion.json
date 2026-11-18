@@ -1,0 +1,55 @@
+{
+  "voz": "diego",
+  "emocion": "alegre",
+  "escenas": [
+    { "id": "gancho", "frases": [
+      { "sub": "¿Haces directos o subes videos largos?", "voz": "¿Haces directos o subes videos largos?" },
+      { "sub": "Tus mejores momentos se están perdiendo.", "voz": "Tus mejores momentos se están perdiendo." }
+    ] },
+    { "id": "logo", "frases": [
+      { "sub": "Con ClipViral, se convierten en clips virales.", "voz": "Con Clip Viral, se convierten en clips virales." }
+    ] },
+    { "id": "quees", "frases": [
+      { "sub": "Pegas el enlace de tu directo o de tu video.", "voz": "Pegas el enlace de tu directo, o de tu video." },
+      { "sub": "ClipViral encuentra los mejores momentos, les pone subtítulos animados y los deja en vertical.", "voz": "Clip Viral encuentra los mejores momentos, les pone subtítulos animados, y los deja en formato vertical." }
+    ] },
+    { "id": "listos", "frases": [
+      { "sub": "Listos para TikTok, Reels y Shorts.", "voz": "Listos para Tik Tok, Rils y Shorts." },
+      { "sub": "Y tus clips se guardan en tu PC.", "voz": "Y tus clips se guardan en tu computadora." }
+    ] },
+    { "id": "planes", "frases": [
+      { "sub": "Hay dos planes. Mira la diferencia.", "voz": "Hay dos planes. Mira la diferencia." }
+    ] },
+    { "id": "local", "frases": [
+      { "sub": "Plan Local: 20 dólares al mes.", "voz": "Plan Local: veinte dólares al mes." },
+      { "sub": "Todo funciona en tu PC: el chat, el volumen y la IA local.", "voz": "Todo funciona en tu computadora, con el chat, el volumen y la inteligencia artificial local." },
+      { "sub": "Sin límite de horas. No necesitas clave de Claude.", "voz": "Sin límite de horas, y no necesitas clave de Clod." }
+    ] },
+    { "id": "claude", "frases": [
+      { "sub": "Plan Claude: 30 dólares al mes.", "voz": "Plan Clod: treinta dólares al mes." },
+      { "sub": "Todo lo del Local, y además…", "voz": "Tiene todo lo del Local, y además," },
+      { "sub": "Claude lee todo el directo y elige los momentos más virales, con título y hashtags.", "voz": "Clod lee todo el directo, y elige los momentos más virales, con título y hashtags." }
+    ] },
+    { "id": "clave", "frases": [
+      { "sub": "Pones tu propia clave de Claude en Ajustes.", "voz": "Para este plan, pones tu propia clave de Clod en Ajustes." },
+      { "sub": "Lo que use Claude se cobra en tu cuenta de Claude.", "voz": "Lo que use Clod, se cobra en tu cuenta de Clod." }
+    ] },
+    { "id": "resumen", "frases": [
+      { "sub": "En resumen: en el Local, elige tu PC.", "voz": "En resumen: en el plan Local, elige tu computadora." },
+      { "sub": "En el Claude, elige Claude.", "voz": "En el plan Clod, elige Clod." }
+    ] },
+    { "id": "piloto", "frases": [
+      { "sub": "Tus clips quedan guardados, listos para subir.", "voz": "Tus clips quedan guardados, listos para subir." },
+      { "sub": "El Piloto vigila tus canales y te sugiere clips. Tú decides qué publicar.", "voz": "Y el Piloto vigila tus canales y te sugiere clips. Tú decides qué publicar." }
+    ] },
+    { "id": "activar", "frases": [
+      { "sub": "Activarlo es fácil.", "voz": "Activarlo es fácil." },
+      { "sub": "Copias el código de tu PC, te mandamos una clave y la pegas.", "voz": "Copias el código de tu computadora, te mandamos una clave, y la pegas." },
+      { "sub": "Cada clave da 30 días. Si renuevas el mismo plan, los días se suman.", "voz": "Cada clave da treinta días. Y si renuevas el mismo plan, los días se suman." }
+    ] },
+    { "id": "cierre", "pausa": 0.9, "frases": [
+      { "sub": "Compra por WhatsApp: +1 849 815 3785", "voz": "Compra por guatsap, al más uno, ocho cuatro nueve, ocho uno cinco, tres siete ocho cinco." },
+      { "sub": "¿Tienes dudas? Toca el botón de Soporte dentro de la app.", "voz": "¿Tienes dudas? Toca el botón de Soporte, dentro de la app." }
+    ] }
+  ]
+}

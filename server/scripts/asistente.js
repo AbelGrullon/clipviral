@@ -117,7 +117,7 @@ function siguienteLinea() {
   return new Promise((r) => tuberia.esperando.push(r));
 }
 
-async function preguntar(pregunta, { oculto = false } = {}) {
+export async function preguntar(pregunta, { oculto = false } = {}) {
   if (!process.stdin.isTTY) {
     process.stdout.write(pregunta);
     const linea = await siguienteLinea();

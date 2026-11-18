@@ -29,3 +29,6 @@ ajustes.json
 dist-*/
 *.exe
 *.blockmap
+servidor-central.txt
+dist-instalador/
+.remotion/

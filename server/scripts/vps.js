@@ -33,6 +33,50 @@ export function caddyfile(host, port) {
   ].join('\n');
 }
 
+// ---------- Caddy que ya tienes funcionando con otras páginas ----------
+const INICIO = '# ClipViral (inicio) - lo agregó "Instalar en el VPS.bat"';
+const FIN = '# ClipViral (fin)';
+export const DOMINIO_SUGERIDO = 'cviral.duckdns.org';
+
+/** El bloque de ClipViral para tu Caddyfile (marcado, para poder cambiarlo después sin tocar lo demás). */
+export function caddyBlock(host, port) {
+  return [INICIO, `${host} {`, '\tencode gzip', `\treverse_proxy 127.0.0.1:${port}`, '}', FIN].join('\n');
+}
+
+/** Pone (o cambia) el bloque de ClipViral en tu Caddyfile sin tocar tus otras páginas. */
+export function ponerEnCaddyfile(texto, host, port) {
+  const nl = /\r\n/.test(texto) ? '\r\n' : '\n';
+  const block = caddyBlock(host, port).replace(/\n/g, nl);
+  const i = texto.indexOf(INICIO);
+  const j = i >= 0 ? texto.indexOf(FIN, i) : -1;
+  if (i >= 0 && j > i) return texto.slice(0, i) + block + texto.slice(j + FIN.length);
+  const base = texto.replace(/\s*$/, '');
+  return `${base}${base ? nl + nl : ''}${block}${nl}`;
+}
+
+/** ¿Tu Caddyfile ya usa esa dirección en OTRO bloque (no en el de ClipViral)? */
+export function hostEnOtroBloque(texto, host) {
+  const i = texto.indexOf(INICIO);
+  const j = i >= 0 ? texto.indexOf(FIN, i) : -1;
+  const resto = i >= 0 && j > i ? texto.slice(0, i) + texto.slice(j + FIN.length) : texto;
+  return resto.split(/\r?\n/).some((l) => !l.trim().startsWith('#')
+    && l.split(/[\s,{]+/).map((w) => w.replace(/^https?:\/\//i, '').toLowerCase()).includes(host.toLowerCase()));
+}
+
+/** La ruta del Caddyfile, sacada de la línea con que se encendió Caddy (--config "C:\...\Caddyfile"). */
+export function configDeLinea(cmd) {
+  const m = String(cmd || '').match(/--config(?:=|\s+)(?:"([^"]+)"|(\S+))/i);
+  return m ? (m[1] || m[2]) : '';
+}
+
+/** Pone (o cambia) una línea CLAVE=valor en server/.env. */
+export function ponerEnEnv(texto, clave, valor) {
+  const re = new RegExp(`^[ \\t]*#?[ \\t]*${clave}[ \\t]*=.*$`, 'm');
+  const line = `${clave}=${valor}`;
+  if (re.test(texto)) return texto.replace(re, line);
+  return `${texto.replace(/\s*$/, '')}\n${line}\n`;
+}
+
 /**
  * Trae los datos de la copia (traer-datos) si este VPS todavía no tiene. Siempre borra traer-datos (tiene tus tokens).
  * Devuelve 'traidos' | 'ya-tenia' | 'sin-copia'.
@@ -74,7 +118,8 @@ export function stopScript(port) {
   return [
     "$ErrorActionPreference = 'SilentlyContinue'",
     `Stop-ScheduledTask -TaskName ${psq(TASK)}`,
-    `Get-NetTCPConnection -LocalPort ${Number(port)} -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`,
+    // Solo se apaga el servidor de ClipViral: si otro programa tuyo usa ese puerto, no se toca.
+    `Get-NetTCPConnection -LocalPort ${Number(port)} -State Listen | ForEach-Object { $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)"; if ($p.CommandLine -like '*src?index.js*' -or $p.CommandLine -like '*vps-servicio*') { Stop-Process -Id $_.OwningProcess -Force } }`,
     `Get-Process caddy | Where-Object { $_.Path -eq ${psq(CADDY)} } | Stop-Process -Force`,
   ].join('\r\n');
 }
@@ -84,7 +129,8 @@ export function firewallScript(ports) {
   return [
     "$ErrorActionPreference = 'Stop'",
     "Get-NetFirewallRule -DisplayName 'ClipViral*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule",
-    `New-NetFirewallRule -DisplayName 'ClipViral' -Direction Inbound -Protocol TCP -LocalPort ${ports.map(Number).join(',')} -Action Allow | Out-Null`,
+    // Con tu Caddy delante (puertos 80 y 443 ya abiertos) no hace falta abrir nada más.
+    ...(ports.length ? [`New-NetFirewallRule -DisplayName 'ClipViral' -Direction Inbound -Protocol TCP -LocalPort ${ports.map(Number).join(',')} -Action Allow | Out-Null`] : []),
   ].join('\r\n');
 }
 
@@ -154,6 +200,39 @@ function setPublicUrl(dataDir, url) {
   });
 }
 
+/** Los Caddy que ya están encendidos en el VPS (que no son el de la carpeta https de ClipViral). */
+function caddyFuncionando() {
+  const r = powershell("Get-CimInstance Win32_Process -Filter \"Name='caddy.exe'\" | Select-Object ExecutablePath, CommandLine | ConvertTo-Json -Compress");
+  if (!r.ok || !r.out) return [];
+  try {
+    const list = [].concat(JSON.parse(r.out.slice(r.out.indexOf(r.out.trim()[0]))));
+    return list.filter((p) => p?.ExecutablePath && path.resolve(p.ExecutablePath).toLowerCase() !== path.resolve(CADDY).toLowerCase())
+      .map((p) => ({ exe: p.ExecutablePath, config: configDeLinea(p.CommandLine) }));
+  } catch { return []; }
+}
+
+/** ¿Algo que NO es ClipViral está usando ese puerto? */
+function puertoOcupado(port) {
+  const r = powershell(`Get-NetTCPConnection -LocalPort ${Number(port)} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)").Name }`);
+  return r.out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] || '';
+}
+
+/**
+ * Agrega ClipViral a TU Caddy (el que ya sirve tus otras páginas): copia de respaldo, bloque marcado y "caddy reload".
+ * Si Caddy no acepta el cambio, se deja tu Caddyfile como estaba.
+ */
+function agregarATuCaddy({ exe, config }, host, port) {
+  const antes = fs.readFileSync(config, 'utf8');
+  if (hostEnOtroBloque(antes, host)) return { ok: false, why: `tu Caddyfile ya usa ${host} en otro bloque. Quita ese bloque o usa otra dirección.` };
+  const respaldo = `${config}.antes-de-clipviral.bak`;
+  if (!fs.existsSync(respaldo)) fs.copyFileSync(config, respaldo);
+  fs.writeFileSync(config, ponerEnCaddyfile(antes, host, port));
+  const r = spawnSync(exe, ['reload', '--config', config, '--adapter', 'caddyfile'], { cwd: path.dirname(config), encoding: 'utf8', windowsHide: true, timeout: 60000 });
+  if (r.status === 0) return { ok: true, respaldo };
+  fs.writeFileSync(config, antes);
+  return { ok: false, why: `Caddy no aceptó el cambio (${`${r.stderr || r.stdout || r.error?.message || ''}`.trim().split(/\r?\n/).pop()?.slice(0, 200)}). Dejé tu Caddyfile como estaba.` };
+}
+
 async function usuarios(dataDir) {
   const file = path.join(dataDir, 'clipviral.db');
   if (!fs.existsSync(file)) return 0;
@@ -197,18 +276,53 @@ async function main() {
   paso(3, 'Tu dirección');
   let prev = '';
   try { prev = fs.readFileSync(DOMINIO_TXT, 'utf8').trim(); } catch {}
-  info('Con una dirección (por ejemplo miclipviral.duckdns.org, gratis en duckdns.org) y Caddy, tu VPS tiene candado (https).');
+  info(`Con una dirección (por ejemplo ${DOMINIO_SUGERIDO}, gratis en duckdns.org) y Caddy, tu VPS tiene candado (https).`);
+  const sugerida = prev || DOMINIO_SUGERIDO;
   let host = '';
   for (;;) {
-    const a = cleanHost(await ask(`    ${negrita('¿Cuál es la dirección de tu VPS?')} ${prev ? `(Enter = ${prev})` : '(Enter = sin dirección, usar la IP)'}: `));
-    host = a || prev;
+    const a = cleanHost(await ask(`    ${negrita('¿Cuál es la dirección de ClipViral?')} (Enter = ${sugerida}; escribe "ip" para no usar dirección): `));
+    host = a === 'ip' ? '' : (a || sugerida);
     if (!host || validHost(host)) break;
-    aviso('Esa dirección no se ve bien. Escríbela así: miclipviral.duckdns.org');
+    aviso(`Esa dirección no se ve bien. Escríbela así: ${DOMINIO_SUGERIDO}`);
   }
   let url;
   let ports;
+  let envText = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : '';
   fs.mkdirSync(HTTPS_DIR, { recursive: true });
-  if (host && fs.existsSync(CADDY)) {
+  // ¿Ya tienes Caddy sirviendo otras páginas en este VPS? Entonces ClipViral se agrega a ESE Caddy (no se abre otro).
+  const tuyo = host ? caddyFuncionando()[0] : null;
+  let conTuCaddy = false;
+  if (tuyo) {
+    ok(`Encontré tu Caddy funcionando (${tuyo.exe}).`);
+    let config = tuyo.config;
+    if (!config || !fs.existsSync(config)) {
+      const guess = path.join(path.dirname(tuyo.exe), 'Caddyfile');
+      const a = (await ask(`    ¿Dónde está tu Caddyfile? (Enter = ${guess}): `)).trim().replace(/^"|"$/g, '');
+      config = a || guess;
+    }
+    if (!fs.existsSync(config)) {
+      aviso(`No encontré ${config}. Agrega esto a tu Caddyfile y recarga Caddy (caddy reload):`);
+      say(caddyBlock(host, port).split('\n').map((l) => `      ${l}`).join('\n'));
+    } else if ((await ask(`    ¿Agrego ClipViral a tu Caddyfile (${config})? Tus otras páginas no se tocan y guardo una copia antes. (S/n): `)).trim().toLowerCase().startsWith('n')) {
+      aviso('No lo toqué. Agrega esto a tu Caddyfile y recarga Caddy (caddy reload):');
+      say(caddyBlock(host, port).split('\n').map((l) => `      ${l}`).join('\n'));
+    } else {
+      const r = agregarATuCaddy({ exe: tuyo.exe, config }, host, port);
+      if (r.ok) ok(`Agregué ClipViral a tu Caddyfile y recargué Caddy. Copia de antes: ${r.respaldo}`);
+      else { mal(r.why); aviso('Agrega esto a tu Caddyfile a mano y recarga Caddy:'); say(caddyBlock(host, port).split('\n').map((l) => `      ${l}`).join('\n')); }
+    }
+    conTuCaddy = true;
+  }
+  if (conTuCaddy) {
+    // Con tu Caddy delante, el servidor solo escucha dentro del VPS; no se enciende otro Caddy.
+    fs.rmSync(CADDYFILE, { force: true });
+    fs.writeFileSync(DOMINIO_TXT, host);
+    envText = ponerEnEnv(envText, 'HOST', '127.0.0.1');
+    fs.writeFileSync(envFile, envText);
+    url = `https://${host}`;
+    ports = [];
+    ok(`Con candado (por tu Caddy): ${cian(url)}`);
+  } else if (host && fs.existsSync(CADDY)) {
     fs.writeFileSync(CADDYFILE, caddyfile(host, port));
     fs.writeFileSync(DOMINIO_TXT, host);
     url = `https://${host}`;
@@ -226,11 +340,22 @@ async function main() {
     ports = [port];
     aviso(`Sin candado: ${cian(url)}. Sirve para probar, pero tu contraseña y tus conexiones viajan sin cifrar.`);
   }
+  if (!conTuCaddy && /^HOST=127\.0\.0\.1\s*$/m.test(envText)) {
+    // Ya no hay Caddy delante: el servidor tiene que escuchar desde afuera otra vez.
+    fs.writeFileSync(envFile, envText.replace(/^HOST=127\.0\.0\.1\s*$/m, '# HOST=127.0.0.1'));
+  }
   await setPublicUrl(dataDir, url);
 
   paso(4, 'Encender el servidor');
+  const ocupado = puertoOcupado(port);
+  if (ocupado) {
+    mal(`El puerto ${port} lo está usando otro programa de tu VPS (${ocupado}). Para no tocarlo, ClipViral no se encendió.`);
+    info(`Abre server\\.env, cambia PORT=${port} por otro (por ejemplo PORT=4610) y vuelve a abrir este archivo.`);
+    process.exit(1);
+  }
   const fw = powershell(firewallScript(ports));
-  if (fw.ok) ok(`Firewall de Windows: abrí el puerto ${ports.join(' y ')}.`);
+  if (!ports.length) ok('Firewall: no hace falta abrir nada (se entra por tu Caddy).');
+  else if (fw.ok) ok(`Firewall de Windows: abrí el puerto ${ports.join(' y ')}.`);
   else aviso(`No pude abrir el firewall (${fw.out.slice(0, 200)}). Ábrelo a mano: puerto ${ports.join(' y ')} TCP de entrada.`);
   const task = powershell(taskScript());
   if (!task.ok) {
@@ -257,10 +382,11 @@ async function main() {
   }
 
   say();
-  say(`  ${negrita('Listo. Ahora, en tu PC:')}`);
-  say(`    1. Abre ClipViral → Ajustes → ${negrita('Servidor de ClipViral')}.`);
-  say(`    2. Pega ${cian(url)} → Probar → Usar mi VPS.`);
-  say('    3. Cierra y abre ClipViral.');
+  say(`  ${negrita('Listo.')}`);
+  say(`    · La web de ClipViral (información, compra y descarga): ${cian(url)}`);
+  say(`    · El panel de administración: ${cian(`${url}/admin/`)}`);
+  say(`    · En tu PC, abre ${negrita('Publicar versión de ClipViral.bat')} con esta dirección: arma el instalador,`);
+  say('      lo sube como actualización y deja el .zip para descargar desde la web.');
   say();
   info('Ya puedes cerrar el Escritorio remoto: el servidor sigue encendido.');
   info('Borra el zip PRIVADO de este VPS y de tu PC: tenía tus conexiones.');

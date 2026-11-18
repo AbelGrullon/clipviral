@@ -67,7 +67,7 @@ function renderStyleCard(el) {
           <div class="opt-row"><span>Fondo propio</span><div class="chips" style="align-items:center">
             <button class="btn small" id="fxBg">${FX.fondo ? 'Cambiar imagen' : 'Elegir imagen'}</button>
             ${FX.fondo ? '<button class="btn small ghost" id="fxBgOff">Quitar</button>' : ''}
-            <span class="muted tiny">${S.settings.style === 'recorte' ? 'Con el formato "Recorte" el video llena la pantalla y no se ve el fondo.' : 'Va detrás del video, en lugar del fondo borroso.'}</span></div></div>
+            <span class="muted tiny">${S.settings.style === 'recorte' ? 'Con el formato "Recorte" el video llena la pantalla y no se ve el fondo.' : S.settings.style === 'camara' ? 'Con "Cámara + juego" no hay fondo: la cámara y el juego llenan la pantalla.' : 'Va detrás del video, en lugar del fondo borroso.'}</span></div></div>
           <div class="opt-row"><span>Quitar silencios</span><div class="chips" style="align-items:center"><label class="toggle"><input type="checkbox" id="fxCuts" ${FX.silencios ? 'checked' : ''}/><span></span></label>
             <span class="muted tiny">Corta las pausas donde no se oye nada: el clip queda más dinámico.</span></div></div>
           <div class="opt-row"><span>Voz</span><div class="chips">${chipRow('efectos', 'voz', [['normal', 'Normal'], ['aguda', '🐿️ Aguda'], ['grave', '👹 Grave'], ['robot', '🤖 Robot'], ['eco', '🔊 Eco'], ['radio', '📻 Radio']], FX.voz)}</div></div>
@@ -123,17 +123,19 @@ function renderStylePreview() {
   const sizes = { 'pequeño': 11, normal: 14, grande: 17, enorme: 20 };
   const words = ['NO', 'PUEDO', 'CREER', 'LO', 'QUE', 'PASÓ'].slice(0, Math.max(1, sub.wordsPerLine));
   const text = words.map((w, i) => `<span class="pw" style="animation-delay:${i * 0.45}s;--hl:${HL[sub.color]}">${sub.uppercase ? w : w.toLowerCase()}</span>`).join(' ');
-  const pos = { arriba: 'top:24%', centro: 'top:50%;transform:translateY(-50%)', abajo: 'bottom:22%' }[sub.position];
+  // Cámara + juego: los subtítulos van más chicos, abajo dentro de la cámara (la cámara ocupa el 32% de arriba).
+  const camSubs = style === 'camara';
+  const pos = camSubs ? 'bottom:70%' : { arriba: 'top:24%', centro: 'top:50%;transform:translateY(-50%)', abajo: 'bottom:22%' }[sub.position];
   const corner = (p) => ({ 'arriba-izq': 'top:6%;left:6%', 'arriba-der': 'top:6%;right:6%', 'abajo-izq': 'bottom:5%;left:6%', 'abajo-der': 'bottom:5%;right:6%' }[p]);
   const z = L.zoom || 1;
   const fx = L.efectos || {};
   const flip = fx.espejo ? 'scaleX(-1)' : '';
   const bgImg = fx.fondo && style !== 'recorte' ? `background:url('${esc(fileUrl(fx.fondo))}?v=${Date.now() % 1e5}') center/cover;filter:none;opacity:1;inset:0` : '';
   box.innerHTML = `
-    ${style === 'blur' || (bgImg && wide) ? `<div class="pv-bg" style="${bgImg}${!bgImg && flip ? `;transform:${flip}` : ''}"></div><div class="pv-video" style="width:${wide ? 100 : 100 * z}%;${flip ? `transform:translate(-50%,-50%) ${flip}` : ''}"></div>` : `<div class="pv-video full" style="transform:scale(${z}) ${flip}"></div>`}
+    ${style === 'camara' ? `<div class="pv-split"><div class="pv-cam" style="${flip ? `transform:${flip}` : ''}"><span>📷 Cámara</span></div><div class="pv-game"><span>🎮 Juego</span></div></div>` : style === 'blur' || (bgImg && wide) ? `<div class="pv-bg" style="${bgImg}${!bgImg && flip ? `;transform:${flip}` : ''}"></div><div class="pv-video" style="width:${wide ? 100 : 100 * z}%;${flip ? `transform:translate(-50%,-50%) ${flip}` : ''}"></div>` : `<div class="pv-video full" style="transform:scale(${z}) ${flip}"></div>`}
     ${fx.velocidad > 1 || fx.voz !== 'normal' || fx.silencios ? `<div class="pv-fx">${[fx.velocidad > 1 ? `⏩ ${fx.velocidad}×` : '', fx.silencios ? '✂️ sin silencios' : '', fx.voz && fx.voz !== 'normal' ? `🎙️ ${fx.voz}` : ''].filter(Boolean).join(' · ')}</div>` : ''}
     ${L.titleBanner.enabled ? `<div class="pv-banner" style="background:${BOXC[L.titleBanner.color]};color:${L.titleBanner.color === 'blanco' ? '#111' : '#fff'};font-family:'${sub.font}'">¡El momento más épico!</div>` : ''}
-    ${S.settings.subtitles ? `<div class="pv-subs ${sub.animation === 'pop' ? 'pop' : ''}" style="${pos};font-family:'${sub.font}';font-size:${(sizes[sub.size] || 14) * (wide ? 0.8 : 1)}px;color:${sub.textColor === 'amarillo' ? '#ffd600' : '#fff'}">${text}</div>` : ''}
+    ${S.settings.subtitles ? `<div class="pv-subs ${sub.animation === 'pop' ? 'pop' : ''}" style="${pos};font-family:'${sub.font}';font-size:${(sizes[sub.size] || 14) * (wide ? 0.8 : camSubs ? 0.68 : 1)}px;color:${sub.textColor === 'amarillo' ? '#ffd600' : '#fff'}">${text}</div>` : ''}
     ${L.watermark.text ? `<div class="pv-mark" style="${corner(L.watermark.position)}">${esc(L.watermark.text)}</div>` : ''}
     ${L.logo.file ? `<img class="pv-logo" src="${esc(fileUrl(L.logo.file))}?v=${Date.now() % 1e5}" style="${corner(L.logo.position)};width:${L.logo.size}%;opacity:${L.logo.opacity / 100}">` : ''}`;
 }

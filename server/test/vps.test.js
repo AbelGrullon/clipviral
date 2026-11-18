@@ -119,3 +119,21 @@ test('Iniciar ClipViral.bat sabe si elegiste tu VPS en la app', () => {
   fs.writeFileSync(path.join(perfil, 'ajustes.json'), '{roto');
   assert.equal(servidorElegido(perfil), '');
 });
+
+test('VPS con tu Caddy: ClipViral se agrega a tu Caddyfile sin tocar tus otras páginas', async () => {
+  const { ponerEnCaddyfile, hostEnOtroBloque, configDeLinea, ponerEnEnv, caddyBlock } = await import('../scripts/vps.js');
+  const tuyo = 'mipagina.com {\r\n\treverse_proxy 127.0.0.1:3000\r\n}\r\n';
+  const con = ponerEnCaddyfile(tuyo, 'cviral.duckdns.org', 4600);
+  assert.ok(con.startsWith(tuyo.trimEnd()), 'tu página queda igual');
+  assert.match(con, /cviral\.duckdns\.org \{\r\n\tencode gzip\r\n\treverse_proxy 127\.0\.0\.1:4600\r\n\}/);
+  assert.equal(ponerEnCaddyfile(con, 'cviral.duckdns.org', 4600), con, 'volver a instalar no lo duplica');
+  assert.equal(ponerEnCaddyfile(con, 'cviral.duckdns.org', 4610), con.replace('4600', '4610'));
+  assert.equal(hostEnOtroBloque(con, 'cviral.duckdns.org'), false);
+  assert.equal(hostEnOtroBloque(`${tuyo}https://cviral.duckdns.org {\n}\n`, 'cviral.duckdns.org'), true);
+  assert.equal(ponerEnCaddyfile('', 'cviral.duckdns.org', 4600), `${caddyBlock('cviral.duckdns.org', 4600)}\n`);
+  assert.equal(configDeLinea('"C:\caddy\caddy.exe" run --config "C:\mis sitios\Caddyfile" --adapter caddyfile'), 'C:\mis sitios\Caddyfile');
+  assert.equal(configDeLinea('caddy.exe run'), '');
+  assert.equal(ponerEnEnv('PORT=4600\n# HOST=\n', 'HOST', '127.0.0.1'), 'PORT=4600\nHOST=127.0.0.1\n');
+  assert.doesNotMatch(firewallScript([]), /New-NetFirewallRule/, 'con tu Caddy no se abre ningún puerto');
+  assert.match(stopScript(4600), /CommandLine -like/, 'solo apaga el servidor de ClipViral');
+});
