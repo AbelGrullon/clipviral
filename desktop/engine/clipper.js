@@ -13,6 +13,19 @@ const LOGO_POS = {
 };
 
 /**
+ * Agrandar sin que se vea tan borroso. La cámara del streamer suele ser chiquita (en un directo de 1080p, unos 480 px
+ * de ancho) y en el vertical se estira a 1080: más del doble. Se agranda con Lanczos (más nítido que el método normal)
+ * y, si se agranda bastante, se le da un enfoque suave (CAS). limpiar: antes de agrandar se quita un poco el ruido de
+ * la compresión de YouTube (si no, el enfoque lo resalta); va en la cámara, no en el juego (le borraría detalles).
+ * factor: cuántas veces se agranda (1 = igual). Devuelve lo que va antes y después del scale.
+ */
+function nitidez(factor, { limpiar = false } = {}) {
+  if (!(factor > 1.1)) return { antes: '', despues: '' };
+  const fuerza = Math.min(0.75, Math.max(0.4, 0.35 + 0.28 * (factor - 1)));
+  return { antes: limpiar && factor > 1.5 ? 'hqdn3d=2:1.5:3:3,' : '', despues: `,cas=${fuerza.toFixed(2)}` };
+}
+
+/**
  * Arma el filtro de FFmpeg.
  * style: 'blur' | 'recorte' | 'horizontal' | 'camara' · opts: { subs, logo, fps, quality, zoom, split }
  * 'camara' (cámara + juego): split = { camCrop, camH, gameCrop, gameH } (de camara.planSplit), en píxeles del video.
@@ -35,9 +48,11 @@ function videoFilter(style, withSubs, opts = {}) {
     // El espejo va después del recorte (las medidas son del video sin voltear).
     const { camCrop: c, camH, gameCrop: g, gameH } = opts.split;
     const flip = opts.mirror ? 'hflip,' : '';
+    const cam = nitidez(Math.max(W / c.w, camH / c.h), { limpiar: true });
+    const game = nitidez(W / g.w);
     parts.push(`[0:v]fps=${fps},split=2[cm][gm]`,
-      `[cm]crop=${c.w}:${c.h}:${c.x}:${c.y},${flip}scale=${W}:${camH}:force_original_aspect_ratio=increase,crop=${W}:${camH},setsar=1[top]`,
-      `[gm]crop=${g.w}:${g.h}:${g.x}:${g.y},${flip}scale=${W}:${gameH},setsar=1[bot]`,
+      `[cm]crop=${c.w}:${c.h}:${c.x}:${c.y},${cam.antes}${flip}scale=${W}:${camH}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${camH}${cam.despues},setsar=1[top]`,
+      `[gm]crop=${g.w}:${g.h}:${g.x}:${g.y},${flip}scale=${W}:${gameH}:flags=lanczos${game.despues},setsar=1[bot]`,
       '[top][bot]vstack=inputs=2,setsar=1[b0]');
   } else if (bg) {
     const fit = style === 'horizontal' ? `scale=${W}:${H}:force_original_aspect_ratio=decrease` : `scale=${Math.round(W * zoom / 2) * 2}:-2`;
@@ -45,7 +60,8 @@ function videoFilter(style, withSubs, opts = {}) {
   } else if (style === 'horizontal') {
     parts.push(`${src}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1[b0]`);
   } else if (style === 'recorte') {
-    parts.push(`${src}scale=${Math.round(W * zoom)}:${Math.round(H * zoom)}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1[b0]`);
+    // El centro del video se agranda para llenar el vertical (en un video de 1080p, casi el doble): Lanczos y enfoque suave.
+    parts.push(`${src}scale=${Math.round(W * zoom)}:${Math.round(H * zoom)}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}${nitidez(1.78 * zoom).despues},setsar=1[b0]`);
   } else {
     // Fondo desenfocado: el video completo en el centro y el mismo video borroso detrás.
     // El borroso se hace en chico (1/4) y se agranda: se ve igual y cuesta mucho menos.
@@ -145,6 +161,8 @@ async function makeClip({ ffmpeg, segments, clip, outFile, style = 'blur', subti
   const video = videoFilter(style, withAss, { logo, fps: look.fps, quality: look.quality, zoom: look.zoom, mirror: fx.espejo, bgInput, cut, speed: fx.velocidad, split });
   const filter = audio ? `${video};${audio}` : video;
 
+  // Cámara + juego y Vertical recortado agrandan la imagen: se guardan con un poco más de calidad (archivo algo más pesado).
+  const fino = style === 'camara' || style === 'recorte';
   const encode = async (gpu) => {
     const args = [
       '-hide_banner', '-loglevel', 'error', '-y',
@@ -154,7 +172,7 @@ async function makeClip({ ffmpeg, segments, clip, outFile, style = 'blur', subti
       '-t', finalDuration.toFixed(2),
       '-filter_complex', filter,
       '-map', '[v]', '-map', audio ? '[a]' : '0:a:0?',
-      ...(gpu ? ['-c:v', 'h264_nvenc', '-preset', 'p5', '-cq', '23', '-b:v', '0'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21']),
+      ...(gpu ? ['-c:v', 'h264_nvenc', '-preset', 'p5', '-cq', fino ? '22' : '23', '-b:v', '0'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', fino ? '20' : '21']),
       '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', outFile,
     ];
     await run(ffmpeg, args, { cwd: tempDir, timeoutMs: 15 * 60 * 1000 });
@@ -174,4 +192,4 @@ async function makeClip({ ffmpeg, segments, clip, outFile, style = 'blur', subti
   return { file: outFile, thumb: fs.existsSync(thumb) ? thumb : null, duration: finalDuration };
 }
 
-module.exports = { makeClip, videoFilter, subsInCam, CAM_SUB_SCALE };
+module.exports = { makeClip, videoFilter, subsInCam, nitidez, CAM_SUB_SCALE };

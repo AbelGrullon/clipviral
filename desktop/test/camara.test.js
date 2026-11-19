@@ -92,8 +92,9 @@ test('plan del vertical: cámara arriba, juego abajo sin franjas y sin que se cu
 test('filtro de FFmpeg: apila cámara y juego; sin plan, el formato normal', () => {
   const split = { camCrop: { x: 1374, y: 200, w: 502, h: 284 }, camH: 610, gameH: 1310, gameCrop: { x: 568, y: 64, w: 784, h: 952 } };
   const f = videoFilter('camara', true, { split, mirror: true });
-  assert.match(f, /crop=502:284:1374:200,hflip,scale=1080:610/);
-  assert.match(f, /crop=784:952:568:64,hflip,scale=1080:1310/);
+  // La cámara se agranda más del doble: se limpia el ruido, se agranda con Lanczos y se enfoca. El juego, solo enfoque suave.
+  assert.match(f, /crop=502:284:1374:200,hqdn3d=2:1\.5:3:3,hflip,scale=1080:610:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:610,cas=0\.67,/);
+  assert.match(f, /crop=784:952:568:64,hflip,scale=1080:1310:flags=lanczos,cas=0\.46,/);
   assert.match(f, /vstack=inputs=2/);
   assert.match(f, /ass=subs\.ass/);
   assert.doesNotMatch(f, /fps=30,hflip,split/, 'el espejo va después de recortar');

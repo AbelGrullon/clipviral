@@ -9,7 +9,11 @@ const path = require('node:path');
 const { run } = require('./util');
 const { SEGMENT_SECONDS } = require('./recorder');
 
+// Primero VP9 normal (no HDR): en YouTube se ve mejor que el H.264 a la misma altura, y pasa de 1080p
+// (el H.264 llega hasta 1080p). Si no hay, H.264 como antes. Los clips se recodifican igual, así que da lo mismo cuál llegue.
+const VP9_SDR = "[vcodec~='^(vp9|vp09\\.00)']";
 const VIDEO_FORMAT = (h) => [
+  `bv*[height<=${h}]${VP9_SDR}+ba[ext=m4a]`,
   `bv*[height<=${h}][vcodec^=avc1]+ba[ext=m4a]`,
   `bv*[height<=${h}][vcodec^=avc1]+ba`,
   `b[height<=${h}]`,

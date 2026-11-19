@@ -152,7 +152,10 @@ class ClipSession extends EventEmitter {
       this.chat.start().then((ok) => ok && this.log('Leyendo el chat en vivo', 'ok'));
     }
 
-    const src = { ytdlp: paths.ytdlp, ytdlpArgs, ffmpeg: paths.ffmpeg, ffprobe: paths.ffprobe, url: this.o.url, dir: path.join(this.workDir, 'video') };
+    // "Cámara + juego" y "Vertical recortado" agrandan una parte del video: si el directo viene en 1440p, se baja en 1440p
+    // (más nítido, pero usa más internet y disco). Los demás formatos se ven igual de bien con 1080p.
+    const zoom = this.o.style === 'camara' || this.o.style === 'recorte';
+    const src = { ytdlp: paths.ytdlp, ytdlpArgs, ffmpeg: paths.ffmpeg, ffprobe: paths.ffprobe, url: this.o.url, dir: path.join(this.workDir, 'video'), maxHeight: zoom ? 1440 : 1080 };
     // Video ya subido: se baja rápido (audio primero) en vez de leerlo en tiempo real como un directo.
     this.recorder = this.info.isLive ? new Recorder({ ...src, isLive: true }) : new VodSource(src);
     // Varios pedazos se pasan a texto a la vez; el análisis sigue el orden del video.
