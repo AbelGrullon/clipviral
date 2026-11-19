@@ -117,3 +117,13 @@ test('recorte para una red: Opus en alta', async () => {
   assert.equal(sent[0].model, OPUS);
   assert.deepEqual(r.body.partes, [{ inicio: 0, fin: 30 }]);
 });
+
+test('buscar la cámara: Haiku en normal, Sonnet en alta y máxima', async () => {
+  for (const [precision, model] of [[undefined, HAIKU], ['alta', SONNET], ['maxima', SONNET]]) {
+    sent.length = 0;
+    const r = await call('/ai/camara', { images: ['QUJD'], precision });
+    assert.equal(r.status, 200);
+    assert.equal(sent[0].model, model, `precisión ${precision}`);
+    assert.equal(r.body.caja, null); // la respuesta simulada no trae cámara
+  }
+});

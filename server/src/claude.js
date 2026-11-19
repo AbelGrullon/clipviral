@@ -248,12 +248,14 @@ const CAM_SCHEMA = {
 };
 
 /**
- * Haiku mira 1 o 2 fotos de un directo y dice dónde está el recuadro de la cámara (0 a 1000).
+ * Claude mira 1 o 2 fotos de un directo y dice dónde está el recuadro de la cámara (0 a 1000).
+ * Precisión normal: Haiku. Alta o máxima: Sonnet, que ubica mejor la cámara (sigue costando menos de un centavo).
  * La app después ajusta el borde sola al marco real.
  */
-export async function findCamera(images) {
+export async function findCamera(images, precision = 'normal') {
+  const model = precision === 'normal' ? HAIKU : SONNET;
   const response = await getClient().messages.create({
-    model: HAIKU,
+    model,
     max_tokens: 300,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: CAM_SCHEMA } },
     messages: [{
@@ -262,8 +264,9 @@ export async function findCamera(images) {
         ...images.map((data) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } })),
         {
           type: 'text',
-          text: 'These are frames from the same live stream. Many streamers show their webcam (the real person filmed by a camera) '
-            + 'in a small rectangle on top of the game. If there is a webcam rectangle, give its bounding box as [x1, y1, x2, y2] '
+          text: 'These are frames from the same live stream or video. Many streamers show their webcam (the real person filmed by a camera) '
+            + 'in a rectangle on top of the game, usually in a corner, sometimes with a colored frame or rounded corners. '
+            + 'If a webcam rectangle appears in any of the frames, give its bounding box as [x1, y1, x2, y2] '
             + 'in 0-1000 relative coordinates of the image (0,0 = top left), covering the whole webcam rectangle including its frame. '
             + 'Characters inside the game are not the webcam. If there is no game (the whole image is a camera) or no webcam, camara=false and caja=[].',
         },
@@ -271,7 +274,7 @@ export async function findCamera(images) {
     }],
   });
   const data = readJson(response);
-  return { camara: !!data?.camara, caja: Array.isArray(data?.caja) ? data.caja.slice(0, 4).map(Number) : [], model: response.model || HAIKU, usage: response.usage };
+  return { camara: !!data?.camara, caja: Array.isArray(data?.caja) ? data.caja.slice(0, 4).map(Number) : [], model: response.model || model, usage: response.usage };
 }
 
 // ---------- Piloto automático: ¿vale la pena clipear estos videos? ----------

@@ -145,7 +145,10 @@ ${blocks}`;
   }
 });
 
-/** Cámara + juego: Haiku busca la cámara del streamer en 1 o 2 fotos (una vez por directo, no descuenta horas). */
+/**
+ * Cámara + juego: Claude busca la cámara del streamer en 1 o 2 fotos (Haiku; Sonnet en precisión alta o máxima).
+ * La app pregunta hasta que la encuentra (máximo unas pocas veces por directo). No descuenta horas.
+ */
 router.post('/camara', async (req, res) => {
   if (!checkAccess(req, res)) return;
   const images = (Array.isArray(req.body?.images) ? req.body.images : [])
@@ -154,7 +157,7 @@ router.post('/camara', async (req, res) => {
     .filter((b) => /^[A-Za-z0-9+/=]+$/.test(b) && b.length < 1_200_000);
   if (!images.length) return res.status(400).json({ error: 'Faltan las fotos del directo.' });
   try {
-    const result = await findCamera(images);
+    const result = await findCamera(images, precisionOf(req.body?.precision));
     const cost = logUsage(req.user.id, 'camara', result.model, result.usage, 0);
     res.json({ caja: result.camara && result.caja.length === 4 ? result.caja : null, costUsd: cost });
   } catch (err) {

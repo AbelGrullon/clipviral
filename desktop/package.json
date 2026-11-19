@@ -1,7 +1,7 @@
 {
   "name": "clipviral",
   "productName": "ClipViral",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "Saca clips virales con subtítulos de directos de YouTube",
   "main": "main.js",
   "private": true,

@@ -1346,17 +1346,21 @@ async function systemCheck(mode) {
 }
 ipcMain.handle('system:check', (e, mode) => systemCheck(mode));
 
-ipcMain.handle('ollama:open', async () => {
+/** Abre Ollama (si ya está abierto, no hace nada) y espera hasta 20 s a que responda. */
+async function startOllama() {
   const exe = findOllama();
   if (!exe) throw new Error('Ollama no está instalado');
+  let st = await localAi.status();
+  if (st.running) return st;
   spawn(exe, exe.endsWith('ollama.exe') ? ['serve'] : [], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
   for (let i = 0; i < 20; i++) {
     await sleep(1000);
-    const st = await localAi.status();
+    st = await localAi.status();
     if (st.running) return st;
   }
   throw new Error('Ollama no respondió. Ábrelo desde el menú Inicio.');
-});
+}
+ipcMain.handle('ollama:open', () => startOllama());
 ipcMain.handle('ytdlp:update', () => components.updateYtdlp(true));
 
 // ---------- Componentes ----------
@@ -1499,6 +1503,8 @@ async function startSession(opts, origin = null) {
     visionModel: s.mode === 'local' ? s.visionModel : '',
     // Para "Cámara + juego" se usa la IA local en los dos modos (es gratis); si no está, Claude en el plan Claude.
     camModel: s.visionModel || '', camStore,
+    // Si elegiste la IA que mira el video pero Ollama está cerrado, se abre solo para buscar la cámara.
+    startOllama: s.visionModel && findOllama() ? startOllama : null,
     // Si no puede abrir el enlace, actualiza yt-dlp (aunque se haya revisado hace poco) y prueba otra vez.
     updateYtdlp: () => components.updateYtdlp(true),
     // Lo que mejor le funciona a tus redes se le pasa a Claude para elegir y titular los clips.

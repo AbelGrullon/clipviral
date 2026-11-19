@@ -38,6 +38,7 @@ function ytdlpProblem(err) {
 
 const AI_WINDOW = 600;     // la IA Pro revisa tramos de 10 minutos
 const AI_MIN_SCORE = 7;    // nota mínima de Haiku para pasar a Sonnet
+const CAM_CLAUDE_TRIES = 3; // veces por directo que Claude busca la cámara si no la ve (menos de un centavo cada una)
 
 class ClipSession extends EventEmitter {
   /**
@@ -46,6 +47,7 @@ class ClipSession extends EventEmitter {
    *       ollamaModel, api (llamadas al servidor), origin (piloto/manual), hints (lo que mejor funciona en tus redes)
    *       oido (detector de sonidos ya creado, o null), visionModel (modelo de Ollama que mira el video, o '')
    *       camModel (modelo de Ollama para encontrar la cámara del streamer, en los dos modos), camStore (cámaras marcadas a mano)
+   *       startOllama (abre Ollama si está cerrado, para buscar la cámara; o null)
    */
   constructor(opts) {
     super();
@@ -528,50 +530,88 @@ class ClipSession extends EventEmitter {
   }
 
   // ---------- Cámara + juego ----------
-  /** Dónde está la cámara del streamer en este tramo: la marcada a mano, la IA local o Claude (una vez por directo). */
+  /** Dónde está la cámara del streamer en este tramo: la marcada a mano, la IA local o Claude. */
   async #camSplit(start, end, segments) {
     const ffmpeg = this.o.paths.ffmpeg;
     const times = [0.25, 0.5, 0.75].map((k) => Math.round((start + (end - start) * k) * 10) / 10);
     const tempDir = path.join(this.workDir, 'camara');
     try {
       const video = await camara.measureVideo({ ffmpeg, segments, times, tempDir });
-      if (!video) return null;
+      if (!video) {
+        this.log('📷 No pude medir el video para ubicar la cámara: este clip va con fondo.', 'warn');
+        return null;
+      }
       if (video.h > video.w) { this.#camNote('vertical', '📷 Este video ya es vertical: va con el formato de siempre.'); return null; }
       const manual = this.o.camStore?.get(this.info.channel) || null;
-      let box = manual;
-      if (!box) {
-        if (this.camLocal === undefined) this.camLocal = await camara.localCamModel(this.o.camModel);
-        if (this.camLocal) {
-          const found = await camara.findCamera({ ffmpeg, segments, times, tempDir, model: this.camLocal });
-          box = found.box;
-          if (found.b64) this.camShot = found.b64;
-        } else if (this.mode === 'ia' && this.o.api) {
-          // Con Claude se pregunta una sola vez por directo (cuesta centavos): los streamers no mueven la cámara.
-          if (this.camClaude === undefined) {
-            const found = await camara.findCamera({ ffmpeg, segments, times, tempDir,
-              askClaude: async (images) => {
-                const r = await this.o.api('/ai/camara', { images });
-                this.#addCost(r.costUsd);
-                return r.caja;
-              } });
-            this.camClaude = found.box;
-            if (found.b64) this.camShot = found.b64;
-          }
-          box = this.camClaude;
-        } else {
-          this.#camNote('sin-ia', '📷 Para "Cámara + juego" hace falta la IA que mira el video (en Ajustes) o el plan Claude. '
-            + 'También puedes marcar la cámara a mano con "Ajustar cámara". Mientras, los clips van con fondo.', 'warn');
-          return null;
-        }
-      }
+      const box = manual || await this.#findCam({ ffmpeg, segments, times, tempDir });
       fs.rmSync(tempDir, { recursive: true, force: true });
-      if (!box) { this.log('📷 No vi la cámara del streamer en este momento: este clip va con fondo.'); return null; }
+      if (box === undefined) return null; // no hay con qué buscarla (ya se avisó)
+      if (!box) {
+        this.log('📷 No vi la cámara del streamer en este momento: este clip va con fondo.');
+        this.#camNote('a-mano', '📷 Si el streamer sí tiene cámara, márcala con "Ajustar cámara": queda guardada para este canal '
+          + 'y los próximos clips salen con la cámara arriba.');
+        return null;
+      }
       this.camBox = box;
       this.#camNote('ok', manual ? '📷 Uso la cámara que marcaste para este canal: va arriba y el juego abajo.'
         : '📷 Encontré la cámara del streamer: va arriba y el juego abajo. Si no quedó bien, toca "Ajustar cámara".', 'ok');
       return camara.planSplit(box, video);
     } catch (err) {
       this.log(`📷 No pude ubicar la cámara (${err.message}). Este clip va con fondo.`, 'warn');
+      return null;
+    }
+  }
+
+  /**
+   * Busca la cámara con IA. Primero la IA local (gratis; si está instalada pero Ollama está cerrado, lo abre).
+   * Si no está o no la ve, Claude (en el plan Claude). Devuelve la caja, null (no la vio) o undefined (no hay IA para buscarla).
+   */
+  async #findCam({ ffmpeg, segments, times, tempDir }) {
+    // La IA local se pregunta en cada clip: es gratis y la cámara a veces se tapa (una pantalla de pausa, una intro).
+    if (!this.camLocal) this.camLocal = await camara.localCamModel(this.o.camModel);
+    if (!this.camLocal && this.o.startOllama && !this.ollamaTried) {
+      this.ollamaTried = true;
+      this.log('📷 Abriendo Ollama para buscar la cámara del streamer (es gratis)…');
+      try {
+        await this.o.startOllama();
+        this.camLocal = await camara.localCamModel(this.o.camModel);
+      } catch (err) {
+        this.log(`📷 No pude abrir Ollama (${err.message}).`, 'warn');
+      }
+    }
+    if (this.camLocal) {
+      const found = await camara.findCamera({ ffmpeg, segments, times, tempDir, model: this.camLocal });
+      if (found.b64) this.camShot = found.b64;
+      if (found.box) return found.box;
+    }
+    if (this.mode !== 'ia' || !this.o.api) {
+      if (this.camLocal) return null;
+      this.#camNote('sin-ia', '📷 Para "Cámara + juego" hace falta la IA que mira el video (en Ajustes) o el plan Claude. '
+        + 'También puedes marcar la cámara a mano con "Ajustar cámara". Mientras, los clips van con fondo.', 'warn');
+      return undefined;
+    }
+    // Claude: cuando la encuentra, se usa esa para todo el directo (los streamers no mueven la cámara).
+    // Si no la ve (por ejemplo, el video empieza con una intro), prueba otra vez en los próximos clips, hasta 3 veces.
+    if (this.camClaude) return this.camClaude;
+    this.camClaudeTries = (this.camClaudeTries || 0) + 1;
+    if (this.camClaudeTries > CAM_CLAUDE_TRIES) return null;
+    try {
+      const found = await camara.findCamera({ ffmpeg, segments, times, tempDir,
+        askClaude: async (images) => {
+          const r = await this.o.api('/ai/camara', { images, precision: this.o.precision || 'normal' });
+          this.#addCost(r.costUsd);
+          return r.caja;
+        } });
+      if (found.b64) this.camShot = found.b64;
+      if (found.box) this.camClaude = found.box;
+      else if (this.camClaudeTries === CAM_CLAUDE_TRIES) {
+        this.log(`📷 Claude no vio la cámara en ${CAM_CLAUDE_TRIES} momentos distintos: el resto de este video va con fondo. `
+          + 'Si el streamer sí tiene cámara, márcala con "Ajustar cámara".', 'warn');
+      }
+      return found.box;
+    } catch (err) {
+      const again = this.camClaudeTries < CAM_CLAUDE_TRIES ? ' Pruebo otra vez en el próximo clip.' : '';
+      this.log(`📷 Claude no pudo buscar la cámara (${err.message}).${again}`, 'warn');
       return null;
     }
   }
