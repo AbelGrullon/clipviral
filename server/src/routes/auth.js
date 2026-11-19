@@ -35,12 +35,14 @@ router.post('/register', limiter, async (req, res) => {
   // Servidor nuevo (por ejemplo el VPS recién instalado): la primera cuenta que se crea es la del administrador.
   const primera = !cliente && !adminApp && !db.prepare('SELECT 1 FROM users').get();
   const passHash = await hashPassword(password);
-  const result = db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan, plan_expires, last_login)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`).run(email, name, passHash, adminApp || primera ? 'admin' : 'user',
-    cliente || adminApp || primera ? 'pro' : 'trial', adminApp || primera ? null : expires);
+  // El dueño del servidor (primera cuenta o la versión para administradores) usa la clave de Claude del servidor.
+  const result = db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan, plan_expires, clave_servidor, last_login)
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`).run(email, name, passHash, adminApp || primera ? 'admin' : 'user',
+    cliente || adminApp || primera ? 'pro' : 'trial', adminApp || primera ? null : expires, adminApp || primera ? 1 : 0);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
   const token = createSession(user.id, req.body?.device);
-  if (!cliente && !adminApp && !primera && days > 0 && mailConfig().auto.bienvenida) sendMail(user, 'bienvenida', { trialDays: days }).catch(() => {});
+  // La bienvenida sale siempre (también con 0 días de prueba: el correo le dice que elija un plan).
+  if (!cliente && !adminApp && !primera && mailConfig().auto.bienvenida) sendMail(user, 'bienvenida', { trialDays: days }).catch(() => {});
   res.status(201).json({ token, user: publicUser(user) });
 });
 

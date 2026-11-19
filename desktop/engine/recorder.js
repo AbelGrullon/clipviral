@@ -7,6 +7,16 @@ const { run } = require('./util');
 
 const SEGMENT_SECONDS = 120;
 
+// Mensajes de FFmpeg que no son un problema: YouTube cierra cada tanto la conexión que FFmpeg tenía abierta y FFmpeg
+// abre otra al instante, sin perder video (comprobado en una grabación real: los pedazos duran lo mismo que el reloj).
+// Antes salían en rojo en "Lo que está pasando" y asustaban.
+const RUIDO_RED = /Error in the pull function|IO error: End of file|Error reading HTTP response: End of file|keepalive request failed|Will reconnect at/i;
+
+/** Lo que FFmpeg escribió, sin el ruido de red de arriba. '' si no queda nada que avisar. */
+function ffmpegWarnings(text) {
+  return String(text).split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !RUIDO_RED.test(l)).join('\n');
+}
+
 class Recorder extends EventEmitter {
   constructor({ ytdlp, ytdlpArgs = [], ffmpeg, ffprobe, url, dir, maxHeight = 1080, isLive = true }) {
     super();
@@ -66,24 +76,43 @@ class Recorder extends EventEmitter {
     ], { cwd: this.dir, windowsHide: true });
     this.ff.stdin.on('error', () => {});
     let ffErr = '';
+    let partial = ''; // un mensaje puede llegar partido en dos: se espera a tener la línea entera
+    const warn = (text) => {
+      const msg = ffmpegWarnings(text);
+      if (msg) this.emit('warn', `FFmpeg: ${msg.slice(0, 300)}`);
+    };
     this.ff.stderr.on('data', (d) => {
       ffErr = (ffErr + d).slice(-2000);
-      this.emit('warn', `FFmpeg: ${String(d).trim().slice(0, 300)}`);
+      const lines = (partial + d).split(/\r?\n/);
+      partial = lines.pop();
+      warn(lines.join('\n'));
     });
-    this.ff.on('close', () => this.#onClose(ffErr.trim() ? '' : 'fin del video'));
+    this.ff.on('close', () => {
+      warn(partial);
+      this.#onClose(ffErr.trim() ? '' : 'fin del video');
+    });
   }
 
   async #onClose(reason) {
     await this.#scan(true).catch(() => {});
-    if (this.stopped) return this.emit('end', { reason: 'stopped' });
+    if (this.stopped) return this.#end('stopped');
     // El directo se cortó o terminó. Probamos reconectar unas veces.
     if (this.isLive && this.restarts < 5) {
       this.restarts += 1;
       this.emit('warn', `Se cortó la conexión. Reintentando (${this.restarts}/5)…`);
       setTimeout(() => !this.stopped && this.#launch(), 4000);
     } else {
-      this.emit('end', { reason: reason || 'fin del video' });
+      this.#end(reason || 'fin del video');
     }
+  }
+
+  /**
+   * Se acabó la grabación: deja de revisar la carpeta cada 2 segundos.
+   * Si no, al terminar la sesión (que borra la carpeta de trabajo) salía "ENOENT … scandir" una y otra vez.
+   */
+  #end(reason) {
+    clearInterval(this.poll);
+    this.emit('end', { reason });
   }
 
   /** Revisa la carpeta: un pedazo está completo cuando ya existe el siguiente. */
@@ -91,7 +120,14 @@ class Recorder extends EventEmitter {
     if (this.scanning) return;
     this.scanning = true;
     try {
-      const files = fs.readdirSync(this.dir).filter((f) => f.startsWith(this.prefix) && f.endsWith('.ts')).sort();
+      let names;
+      try {
+        names = fs.readdirSync(this.dir);
+      } catch (err) {
+        if (err.code === 'ENOENT') return; // la carpeta ya no está (la sesión terminó y la borró)
+        throw err;
+      }
+      const files = names.filter((f) => f.startsWith(this.prefix) && f.endsWith('.ts')).sort();
       const ready = final ? files : files.slice(0, -1);
       for (const name of ready) {
         const file = path.join(this.dir, name);
@@ -140,8 +176,8 @@ class Recorder extends EventEmitter {
     // "q" le pide a FFmpeg que cierre bien el último pedazo; si no responde, se cierra a la fuerza.
     try { this.ff?.stdin.write('q'); } catch {}
     setTimeout(() => { try { this.ff?.kill(); } catch {} }, 8000);
-    if (!this.ff) this.emit('end', { reason: 'stopped' });
+    if (!this.ff) this.#end('stopped');
   }
 }
 
-module.exports = { Recorder, SEGMENT_SECONDS };
+module.exports = { Recorder, SEGMENT_SECONDS, ffmpegWarnings };

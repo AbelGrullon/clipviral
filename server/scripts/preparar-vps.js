@@ -24,6 +24,14 @@ export const INCLUIR_VPS = [
   'server/public',
   'server/scripts',
   'desktop/engine',
+  // El bot de Discord (tickets y anuncios). Su token NO va: se pega en el VPS al instalarlo.
+  'Instalar bot de Discord en el VPS.bat',
+  'GUIA-DISCORD.md',
+  'discord-bot/package.json',
+  'discord-bot/package-lock.json',
+  'discord-bot/.env.example',
+  'discord-bot/src',
+  'discord-bot/scripts',
 ];
 
 /**

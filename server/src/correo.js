@@ -1,7 +1,7 @@
 // Correos de ClipViral: bienvenida, recuperar contraseña, pagos, avisos de vencimiento y avisos del admin.
 // Se envían por SMTP (pensado para Gmail con una "contraseña de aplicación"). La contraseña se guarda cifrada.
 import nodemailer from 'nodemailer';
-import { db, getSetting, setSetting } from './db.js';
+import { db, getSetting, setSetting, supportContact, esEnlace } from './db.js';
 import { seal, open } from './secretbox.js';
 
 const DEFAULTS = { host: 'smtp.gmail.com', port: 465 };
@@ -71,7 +71,8 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const fecha = (iso) => (iso ? new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
 
 function layout(title, body) {
-  const support = getSetting('support_contact');
+  const s = supportContact();
+  const support = esEnlace(s) ? `<a href="${esc(s)}" style="color:#ff8a3d">${esc(s)}</a>` : esc(s);
   return `<!doctype html><html><body style="margin:0;background:#0f0b1a;font-family:Arial,Helvetica,sans-serif;color:#ece9f5">
   <div style="max-width:560px;margin:0 auto;padding:28px 18px">
     <div style="font-size:20px;font-weight:bold;margin-bottom:18px"><span style="background:linear-gradient(90deg,#ff3d8b,#ff8a3d);border-radius:8px;padding:4px 10px;color:#fff">▶</span> ClipViral</div>
@@ -79,7 +80,7 @@ function layout(title, body) {
       <h1 style="font-size:22px;margin:0 0 14px;color:#fff">${esc(title)}</h1>
       ${body}
     </div>
-    <p style="color:#8f88a8;font-size:12px;margin-top:18px">${support ? `¿Dudas? Escríbenos: ${esc(support)}<br>` : ''}Recibes este correo porque tienes una cuenta en ClipViral.</p>
+    <p style="color:#8f88a8;font-size:12px;margin-top:18px">¿Dudas? Escríbenos: ${support}<br>Recibes este correo porque tienes una cuenta en ClipViral.</p>
   </div></body></html>`;
 }
 const p = (t) => `<p style="margin:0 0 12px">${t}</p>`;
@@ -89,7 +90,8 @@ export const TEMPLATES = {
   bienvenida: ({ name, trialDays }) => ({
     subject: '¡Bienvenido a ClipViral! 🎬',
     html: layout(`¡Hola, ${name}!`, p('Tu cuenta de ClipViral ya está lista. Pega el enlace de un directo o un video de YouTube y la app saca los mejores momentos con subtítulos, listos para TikTok, Reels y Shorts.')
-      + (trialDays ? p(`Tienes <b>${esc(trialDays)} días de prueba</b> para probar todo. Cuando quieras seguir, elige un plan en la app (sección <b>Mi plan</b>) y paga con tarjeta.`) : '')),
+      + (trialDays ? p(`Tienes <b>${esc(trialDays)} días de prueba</b> para probar todo. Cuando quieras seguir, elige un plan en la app (sección <b>Mi plan</b>) y paga con tarjeta.`)
+        : p('Para empezar, elige un plan en la app (sección <b>Mi plan</b>) y paga con tarjeta. Se activa al momento.'))),
   }),
   codigo: ({ name, code }) => ({
     subject: `Tu código para cambiar la contraseña: ${code}`,

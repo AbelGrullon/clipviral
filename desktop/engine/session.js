@@ -64,6 +64,9 @@ class ClipSession extends EventEmitter {
     this.aiCalls = 0;
     this.whisperGpu = this.o.whisperGpu;
     this.chatCount = 0;
+    // "Saca ese clip": segundos de los pedidos ya atendidos y hasta dónde se buscaron.
+    this.pedidosHechos = [];
+    this.pedidosDesde = 0;
   }
 
   log(text, kind = 'info') { this.emit('log', { text, kind, at: Date.now() }); }
@@ -143,7 +146,7 @@ class ClipSession extends EventEmitter {
       this.chat.on('message', (m) => {
         this.chatCount += 1;
         if (!this.recorder?.startedAt) return;
-        this.timeline.addChat((m.wall - this.recorder.startedAt) / 1000, m.text);
+        this.timeline.addChat((m.wall - this.recorder.startedAt) / 1000, m.text, m);
       });
       this.chat.on('warn', (w) => this.log(w, 'warn'));
       this.chat.start().then((ok) => ok && this.log('Leyendo el chat en vivo', 'ok'));
@@ -256,16 +259,52 @@ class ClipSession extends EventEmitter {
     return this.clips.filter((c) => at - c.start < 3600).length;
   }
 
+  // ---------- "Saca ese clip" ----------
+  /** Pedidos de clip nuevos hasta `hasta` (el streamer lo dice, el dueño o un moderador escribe !clip, o el chat lo pide). */
+  #nuevosPedidos(hasta) {
+    const desde = this.pedidosDesde;
+    this.pedidosDesde = Math.max(desde, hasta - 3);
+    const nuevos = this.timeline.clipRequests(Math.max(0, desde - 15), hasta)
+      .filter((p) => !this.pedidosHechos.some((t) => Math.abs(t - p.t) < 25));
+    this.pedidosHechos.push(...nuevos.map((p) => p.t));
+    if (this.pedidosHechos.length > 40) this.pedidosHechos.splice(0, this.pedidosHechos.length - 40);
+    return nuevos;
+  }
+
+  /** Clip de lo que pasó justo ANTES del pedido. Sin Claude: título automático (o el de la IA local si está). */
+  async #producePedido(p, ollama = null) {
+    const L = Math.max(15, this.o.clipSeconds);
+    const { start, end } = this.timeline.snap(Math.max(0, p.t - L + 2), Math.min(this.timeline.until, p.t + 2));
+    if (this.#overlaps(start, end)) {
+      this.log(`🎯 ${quienPide(p)} pidió clip en ${fmtClock(p.t)}: ese momento ya tiene su clip.`);
+      return;
+    }
+    this.log(`🎯 ${quienPide(p)} pidió clip ("${p.frase}") en ${fmtClock(p.t)}. Lo saco.`, 'ok');
+    const words = this.timeline.wordsBetween(start, end);
+    let meta = { title: autoTitle(words.length ? words : [{ w: this.info.title || 'Momento' }]), hashtags: defaultTags(this.info), description: '', score: 9 };
+    if (ollama) {
+      try {
+        const transcript = this.timeline.lines(start, end).map((l) => `[${l.t}] ${l.text}`).join('\n');
+        const r = await localAi.review(ollama, { streamTitle: this.info.title, transcript, chatSummary: this.timeline.chatSummary(start, end) });
+        meta = { ...meta, title: r.title || meta.title, hashtags: r.hashtags.length ? r.hashtags : meta.hashtags, description: r.description || '' };
+      } catch { /* sigue con el título automático */ }
+    }
+    await this.#produce({ start, end, ...meta, reason: `${quienPide(p)} pidió este clip ("${p.frase}").`, pedido: pedidoDe(p) });
+  }
+
   // ---------- Modo Local ----------
   async #analyzeLocal(final) {
     const L = this.o.clipSeconds;
+    // Lo que pidió el streamer (o el chat) va primero y sin filtros: él sabe qué quiere.
+    const pedidos = this.#nuevosPedidos(final ? this.timeline.until : this.timeline.until - 3);
     const horizon = final ? this.timeline.until : this.timeline.until - L;
-    if (horizon <= this.localFrom) return;
-    const peaks = this.timeline.findPeaks(Math.max(0, this.localFrom - L), horizon, { clipSeconds: L, sensitivity: this.o.sensitivity });
-    this.localFrom = horizon;
+    const peaks = horizon > this.localFrom
+      ? this.timeline.findPeaks(Math.max(0, this.localFrom - L), horizon, { clipSeconds: L, sensitivity: this.o.sensitivity })
+      : [];
+    this.localFrom = Math.max(this.localFrom, horizon);
     let ollama = null;
     let eyes = null;
-    if (peaks.length && (this.o.ollamaModel || this.o.visionModel)) {
+    if ((peaks.length || pedidos.length) && (this.o.ollamaModel || this.o.visionModel)) {
       const st = await localAi.status();
       const has = (id) => !!id && st.running && st.models.some((m) => m === id || m.startsWith(`${id}`));
       ollama = has(this.o.ollamaModel) ? this.o.ollamaModel : null;
@@ -275,6 +314,7 @@ class ClipSession extends EventEmitter {
         this.log(st.running ? `El modelo que mira el video (${this.o.visionModel}) no está descargado. Sigo sin él.` : 'Ollama está apagado: sigo sin mirar el video.', 'warn');
       }
     }
+    for (const p of pedidos) await this.#producePedido(p, ollama);
     const threshold = SENSITIVITY[this.o.sensitivity] ?? SENSITIVITY.media;
     for (const peak of peaks) {
       if (peak.t - this.lastPeakT < L) continue;
@@ -341,11 +381,14 @@ class ClipSession extends EventEmitter {
     if (to - from < (final ? 15 : AI_WINDOW)) return;
     const L = this.o.clipSeconds;
     const ctxStart = Math.max(0, from - 60);
+    // Precisión que eligió el cliente: qué modelos de Claude se usan (normal, alta o maxima).
+    const precision = this.o.precision || 'normal';
     this.log(`Claude está revisando ${fmtClock(from)} – ${fmtClock(to)}…`);
     let scan;
     try {
       scan = await this.o.api('/ai/scan', {
         title: this.info.title,
+        precision,
         windowStart: ctxStart,
         windowSeconds: Math.round(to - from),
         clipSeconds: L,
@@ -363,50 +406,71 @@ class ClipSession extends EventEmitter {
       }
       this.log(`${err.message}`, 'warn');
       if (to - from > 1500 || final) this.aiWindowStart = to; // no dejamos que el tramo crezca sin fin
+      // Lo que pidió el streamer no se pierde aunque Claude falle: se saca igual, con título automático.
+      for (const p of this.#nuevosPedidos(final ? to : to - 3)) await this.#producePedido(p);
       return;
     }
     this.aiWindowStart = to;
     if (typeof scan.secondsUsed === 'number') this.aiSecondsUsed = scan.secondsUsed;
     this.#addCost(scan.costUsd);
 
+    const pedidos = this.#nuevosPedidos(final ? to : to - 3);
     const good = scan.candidates
       .filter((c) => c.score >= AI_MIN_SCORE && c.end > c.start && !this.#overlaps(c.start, c.end))
       .slice(0, 8);
-    if (!good.length) { this.log(`Nada viral entre ${fmtClock(from)} y ${fmtClock(to)}`); return; }
+    if (!good.length && !pedidos.length) { this.log(`Nada viral entre ${fmtClock(from)} y ${fmtClock(to)}`); return; }
 
-    this.log(`Claude encontró ${good.length} posible${good.length > 1 ? 's' : ''}. Eligiendo los mejores…`);
+    for (const p of pedidos) this.log(`🎯 ${quienPide(p)} pidió clip ("${p.frase}") en ${fmtClock(p.t)}. Claude lo va a preparar.`, 'ok');
+    // Los pedidos van primero: lo que hay que sacar pasó justo antes, y Claude busca dónde empieza.
+    const cands = [
+      ...pedidos.map((p) => ({ start: Math.max(0, p.t - Math.max(L, 30) - 15), end: p.t + 3, score: 10, reason: `${quienPide(p)} pidió este clip`, pedido: p })),
+      ...good,
+    ];
+    if (good.length) this.log(`Claude encontró ${good.length} posible${good.length > 1 ? 's' : ''}. Eligiendo los mejores…`);
     let picked;
     try {
       picked = await this.o.api('/ai/pick', {
         title: this.info.title,
         clipSeconds: L,
-        maxClips: Math.max(1, Math.min(4, this.o.maxPerHour)),
+        precision,
+        maxClips: Math.min(10, Math.max(1, Math.min(4, this.o.maxPerHour)) + pedidos.length),
         hints: this.o.hints || '',
-        candidates: good.map((c, i) => ({
+        candidates: cands.map((c, i) => ({
           id: String(i + 1), start: c.start, end: c.end, score: c.score, reason: c.reason,
-          transcript: this.timeline.lines(c.start - 10, c.end + 10),
+          pedido: c.pedido ? { quien: c.pedido.quien, frase: c.pedido.frase, t: Math.round(c.pedido.t) } : undefined,
+          transcript: this.timeline.lines(c.start - (c.pedido ? 20 : 10), c.end + 10),
           chatSummary: this.timeline.chatSummary(c.start, c.end),
         })),
-      });
+      }, 'POST', 5 * 60000); // Opus piensa más: se le da más tiempo
     } catch (err) {
       this.log(`${err.message}`, 'warn');
+      for (const p of pedidos) await this.#producePedido(p);
       return;
     }
     this.#addCost(picked.costUsd);
-    for (const c of picked.clips) {
-      let start = Math.max(ctxStart - 30, c.start);
+    const clips = picked.clips.map((c) => ({ ...c, cand: cands[Number(c.id) - 1] }))
+      .sort((x, y) => (y.cand?.pedido ? 1 : 0) - (x.cand?.pedido ? 1 : 0));
+    for (const c of clips) {
+      const pedido = c.cand?.pedido || null;
+      let start = Math.max(ctxStart - (pedido ? 90 : 30), c.start);
       let end = Math.min(this.timeline.until, c.end);
       if (end - start < 12) end = Math.min(this.timeline.until, start + 12);
       if (end - start > 120) end = start + 120;
       ({ start, end } = this.timeline.snap(start, end));
       if (this.#overlaps(start, end)) continue;
-      // Por qué funcionaría: lo que dice Sonnet (o, si no, lo que marcó Haiku). redes: el texto listo de cada red.
-      const reason = c.reason || good[Number(c.id) - 1]?.reason || 'Elegido por Claude';
-      await this.#produce({ start, end, title: c.title, hashtags: c.hashtags, description: c.description, score: c.score, reason, redes: c.redes || null });
+      // Por qué funcionaría: lo que dice Claude al elegir (o, si no, lo que marcó al revisar). redes: el texto listo de cada red.
+      const reason = c.reason || c.cand?.reason || 'Elegido por Claude';
+      // Si Claude juntó el pedido con otro momento, el clip igual queda marcado como pedido.
+      const pide = pedido || pedidos.find((p) => p.t >= start - 2 && p.t <= end + 8) || null;
+      await this.#produce({ start, end, title: c.title, hashtags: c.hashtags, description: c.description, score: c.score, reason, redes: c.redes || null, pedido: pide && pedidoDe(pide) });
+    }
+    // Si Claude dejó afuera algún pedido, se saca igual (con título automático).
+    for (const p of pedidos) {
+      if (!this.clips.some((c) => c.pedido && Math.abs(c.pedido.t - p.t) < 1)) await this.#producePedido(p);
     }
   }
 
-  async #produce({ start, end, title, hashtags, description, score, reason, redes = null }) {
+  async #produce({ start, end, title, hashtags, description, score, reason, redes = null, pedido = null }) {
     const n = this.clips.length + 1;
     const name = `${String(n).padStart(3, '0')}_${slug(title, 45)}`;
     const outFile = path.join(this.outDir, `${name}.mp4`);
@@ -440,6 +504,8 @@ class ClipSession extends EventEmitter {
         title, description: description || '', hashtags: tags, score, reason,
         // Texto de cada red escrito por Claude (en modo Local no hay: Clips sugeridos usa la plantilla).
         redes,
+        // "Saca ese clip": quién lo pidió ('streamer' o 'chat'), qué dijo y en qué segundo. null si lo eligió la app.
+        pedido: pedido || null,
         start, end, duration: result.duration,
         stream: { id: this.info.id, title: this.info.title, channel: this.info.channel, url: this.info.url },
         mode: this.mode,
@@ -587,6 +653,9 @@ class ClipSession extends EventEmitter {
     else this.#finish('detenido');
   }
 }
+
+const quienPide = (p) => (p.quien === 'chat' ? 'El chat' : 'El streamer');
+const pedidoDe = (p) => ({ quien: p.quien, frase: p.frase, t: Math.round(p.t) });
 
 function autoTitle(words) {
   const text = words.map((w) => w.w).join(' ').replace(/\s+([.,!?])/g, '$1').trim();

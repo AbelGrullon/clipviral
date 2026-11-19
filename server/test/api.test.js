@@ -87,7 +87,7 @@ test('cliente: no puede publicar en redes ni programar', async () => {
 });
 
 test('cliente: su propia clave de Claude (se revisa antes de guardar)', async () => {
-  assert.deepEqual((await call('GET', '/me/claude', null, userToken)).body, { enabled: false, masked: '', unreadable: false });
+  assert.deepEqual((await call('GET', '/me/claude', null, userToken)).body, { enabled: false, masked: '', own: false, server: false, puedeServidor: false, unreadable: false });
   const bad = await call('PUT', '/me/claude', { key: 'hola' }, userToken);
   assert.equal(bad.status, 400);
   assert.match(bad.body.error, /no parece una clave/);
@@ -125,6 +125,9 @@ test('IA sin clave responde 503 claro', async () => {
   assert.equal((await call('POST', '/ai/rank', { temas: ['x'], videos: [{ id: 'a', title: 'b' }] }, userToken)).status, 503);
   assert.equal((await call('POST', '/ai/competencia', { competitors: [{ name: 'x', posts: [] }] }, userToken)).status, 503);
   assert.equal((await call('POST', '/ai/competencia', {})).status, 401);
+  // Recorte para Instagram / Facebook: igual (la app entonces corta el final, como antes).
+  assert.equal((await call('POST', '/ai/recorte', { duracion: 80, maximo: 39, frases: [{ s: 1, e: 2, texto: 'hola' }] }, userToken)).status, 503);
+  assert.equal((await call('POST', '/ai/recorte', { duracion: 80, maximo: 39 })).status, 401);
 });
 
 test('verificador de actualizaciones', async () => {

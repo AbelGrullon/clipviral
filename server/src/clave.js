@@ -90,18 +90,36 @@ export function removeKey() {
 
 // ---------- Clave de cada cliente (plan Claude) ----------
 
-/** La clave que usa este usuario: el admin, la del servidor; un cliente, la suya. */
-export function keyForUser(user) {
-  if (!user) return null;
-  if (user.role === 'admin') return activeKey().key;
-  if (!user.claude_key) return null;
+function ownKey(user) {
+  if (!user?.claude_key) return null;
   try { return open(user.claude_key); } catch { return null; }
 }
 
-/** Estado de la clave del cliente para la app (nunca la clave completa). */
+/** ¿Este admin puede usar la clave del servidor (la del dueño)? Se marca en el panel → Usuarios → Gestionar. */
+const usaLaDelServidor = (user) => user?.role === 'admin' && !!user.clave_servidor;
+
+/**
+ * La clave que usa esta cuenta: primero la suya propia (cliente del plan Claude o admin que puso la suya);
+ * si no tiene, un admin con permiso usa la del servidor. Si no, ninguna (la IA Pro queda apagada para esa cuenta).
+ */
+export function keyForUser(user) {
+  if (!user) return null;
+  return ownKey(user) || (usaLaDelServidor(user) ? activeKey().key : null);
+}
+
+/** Estado de la clave de esta cuenta para la app (nunca la clave completa). */
 export function userKeyStatus(user) {
-  const key = user.role === 'admin' ? activeKey().key : keyForUser(user);
-  return { enabled: !!key, masked: maskKey(key), unreadable: !!user.claude_key && !key && user.role !== 'admin' };
+  const own = ownKey(user);
+  const serverKey = usaLaDelServidor(user) ? activeKey().key : null;
+  const key = own || serverKey;
+  return {
+    enabled: !!key,
+    masked: maskKey(key),
+    own: !!own, // usa su propia clave
+    server: !own && !!serverKey, // usa la del servidor (la del dueño)
+    puedeServidor: !!serverKey, // si quita la suya, vuelve a usar la del servidor
+    unreadable: !!user.claude_key && !own,
+  };
 }
 
 /** Prueba la clave del cliente (no cuesta nada) y, si sirve, la guarda cifrada en su cuenta. */
@@ -112,10 +130,11 @@ export async function saveUserKey(user, raw) {
   const result = await checkApiKey(key);
   if (!result.ok) return result;
   db.prepare('UPDATE users SET claude_key = ? WHERE id = ?').run(seal(key), user.id);
-  return { ok: true, status: { enabled: true, masked: maskKey(key), unreadable: false } };
+  const puedeServidor = usaLaDelServidor(user) && !!activeKey().key;
+  return { ok: true, status: { enabled: true, masked: maskKey(key), own: true, server: false, puedeServidor, unreadable: false } };
 }
 
 export function removeUserKey(user) {
   db.prepare('UPDATE users SET claude_key = NULL WHERE id = ?').run(user.id);
-  return { enabled: false, masked: '', unreadable: false };
+  return userKeyStatus({ ...user, claude_key: null });
 }

@@ -129,7 +129,7 @@ function sugCard(it, first) {
     </div>
     <div class="sug-body">
       <div class="sug-top">
-        <div class="grow"><div class="sug-title">${first && pending ? '<span class="badge grad">⭐ Súbelo primero</span> ' : ''}${esc(c.title)}</div>
+        <div class="grow"><div class="sug-title">${first && pending ? '<span class="badge grad">⭐ Súbelo primero</span> ' : ''}${c.pedido ? `<span class="badge pedido">🎯 Pedido por ${c.pedido.quien === 'chat' ? 'el chat' : 'el streamer'}</span> ` : ''}${esc(c.title)}</div>
           <div class="muted tiny">${esc(c.stream?.channel || '')} · ${sugOriginLabel(c)} · ${ago(it.addedAt)}</div></div>
         <span class="badge ${it.textosDe === 'ia' ? 'grad' : ''}" title="${it.textosDe === 'ia' ? 'Claude escribió un texto distinto para cada red' : 'Texto armado con tu plantilla (sección Redes). Con IA Pro, Claude lo escribe para cada red.'}">${it.textosDe === 'ia' ? '✨ Texto de Claude' : '📝 Texto con plantilla'}</span>
       </div>

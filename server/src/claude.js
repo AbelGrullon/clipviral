@@ -96,6 +96,19 @@ const PRICES = {
   'claude-opus-5-5': [4, 20],
 };
 
+// Precisión que elige el cliente en la app (Ajustes del directo → Precisión de Claude): qué modelo hace cada paso.
+// [modelo, esfuerzo]. El barrido lee todo el directo (muchas consultas): por eso se queda en Haiku salvo en "maxima".
+export const PRECISION = {
+  normal: { scan: [HAIKU, 'low'], pick: [SONNET, 'low'], trim: [SONNET, 'low'] },
+  alta: { scan: [HAIKU, 'low'], pick: [OPUS, 'medium'], trim: [OPUS, 'medium'] },
+  maxima: { scan: [SONNET, 'low'], pick: [OPUS, 'high'], trim: [OPUS, 'medium'] },
+};
+
+/** 'normal', 'alta' o 'maxima' (cualquier otra cosa → 'normal'). */
+export function precisionOf(value) {
+  return Object.hasOwn(PRECISION, value) ? value : 'normal';
+}
+
 export function costOf(model, usage) {
   const [inPrice, outPrice] = PRICES[model] || PRICES[SONNET];
   const input = (usage?.input_tokens || 0) + (usage?.cache_creation_input_tokens || 0) + (usage?.cache_read_input_tokens || 0);
@@ -162,7 +175,13 @@ Para cada clip elegido:
   · "facebook": conversacional, para un público más adulto; de 2 a 3 hashtags.
   No pongas #Shorts, #fyp ni #parati: la app los agrega cuando hacen falta.
 No inventes cosas que no pasaron en el directo. Si ninguno vale la pena, devuelve una lista vacía.
-Si el mensaje trae "LO QUE MEJOR FUNCIONA EN SUS REDES", úsalo para elegir y titular (sin inventar momentos para cumplirlo).`;
+Si el mensaje trae "LO QUE MEJOR FUNCIONA EN SUS REDES", úsalo para elegir y titular (sin inventar momentos para cumplirlo).
+
+Candidatos "PEDIDO POR EL STREAMER" o "PEDIDO POR EL CHAT": alguien pidió ese clip en vivo (dijo "saca ese clip", "clipéalo", "!clip"…).
+- Devuélvelos siempre, aunque no te parezcan los mejores, y no cuentan para el máximo de clips.
+- Lo que hay que sacar pasó justo ANTES del pedido: busca en la transcripción dónde empieza ese momento
+  (con el contexto justo para entenderlo) y termina el clip en el pedido o uno o dos segundos después.
+- El pedido no es el momento: no titules el clip con "saca ese clip"; titula lo que pasó.`;
 
 // Texto listo para publicar en una red.
 const NETWORK_TEXT_SCHEMA = {
@@ -342,39 +361,114 @@ export async function competitorReport(prompt) {
   return { report: readJson(response), model: response.model || OPUS, usage: response.usage };
 }
 
-/** Paso 1 (barato): Haiku lee el tramo completo y marca posibles momentos. */
-export async function scanWindow(prompt) {
+/** Paso 1 (barato): Haiku (o Sonnet, en precisión máxima) lee el tramo completo y marca posibles momentos. */
+export async function scanWindow(prompt, precision = 'normal') {
+  const [model, effort] = PRECISION[precisionOf(precision)].scan;
   const response = await getClient().messages.create({
-    model: HAIKU,
-    max_tokens: 4000,
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: SCAN_SCHEMA } },
+    model,
+    max_tokens: model === HAIKU ? 4000 : 8000,
+    output_config: { effort, format: { type: 'json_schema', schema: SCAN_SCHEMA } },
     system: SCAN_SYSTEM,
     messages: [{ role: 'user', content: cut(prompt) }],
   });
   const data = readJson(response);
   return {
     candidates: Array.isArray(data?.candidates) ? data.candidates : [],
-    model: response.model || HAIKU,
+    model: response.model || model,
     usage: response.usage,
   };
 }
 
-/** Paso 2 (preciso): Sonnet revisa solo los candidatos buenos y prepara título, hashtags y el texto de cada red. */
-export async function pickClips(prompt) {
+/**
+ * Paso 2 (preciso): Sonnet (u Opus, en precisión alta y máxima) revisa solo los candidatos buenos y prepara título,
+ * hashtags y el texto de cada red.
+ */
+export async function pickClips(prompt, precision = 'normal') {
+  const [model, effort] = PRECISION[precisionOf(precision)].pick;
   const response = await getClient().beta.messages.create({
-    model: SONNET,
-    // Más lugar que antes: ahora también escribe el texto de 4 redes por clip.
-    max_tokens: 16000,
+    model,
+    // Lugar para el texto de 4 redes por clip (y, con Opus, para lo que piensa antes de elegir).
+    // Sin pasar de ~21.000: más que eso el SDK exige respuesta por partes (streaming).
+    max_tokens: model === OPUS ? 20000 : 16000,
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: PICK_SCHEMA } },
+    output_config: { effort, format: { type: 'json_schema', schema: PICK_SCHEMA } },
     system: PICK_SYSTEM,
     messages: [{ role: 'user', content: cut(prompt) }],
   });
   const data = readJson(response);
   return {
     clips: Array.isArray(data?.clips) ? data.clips : [],
-    model: response.model || SONNET,
+    model: response.model || model,
+    usage: response.usage,
+  };
+}
+
+// ---------- Recorte para una red: dejar lo mejor del clip en pocos segundos ----------
+// Instagram (por la API, cuentas nuevas) no acepta Reels de más de ~40 s y Facebook no acepta más de 90 s.
+// En vez de cortar el final, Claude elige qué partes del clip se quedan (cortes saltados).
+export const TRIM_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['partes', 'resumen'],
+  properties: {
+    partes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['inicio', 'fin'],
+        properties: { inicio: { type: 'number' }, fin: { type: 'number' } },
+      },
+    },
+    resumen: { type: 'string' },
+  },
+};
+
+const TRIM_SYSTEM = `Eres editor de videos verticales virales (Reels, Shorts, TikTok).
+Recibes un clip que dura más de lo que acepta una red social. Tienes que dejar SOLO lo más interesante
+en el tiempo pedido, con cortes saltados (jump cuts): quitas pedazos y unes lo que queda.
+
+Recibes lo que se dice (con el segundo en que empieza y termina cada frase), el volumen de cada segundo
+(0 = silencio, 9 = lo más fuerte del clip) y fotos del clip con su segundo.
+
+Reglas:
+- Devuelve las partes que SE QUEDAN, en orden de tiempo y sin pisarse, en segundos del clip original.
+- La suma de las partes debe quedar entre el mínimo y el máximo pedidos. Nunca más del máximo.
+- Empieza fuerte: los primeros 2 segundos deciden si la gente se queda. Si el comienzo es lento, sáltalo.
+- Quita lo que aburre: silencios, esperas, muletillas, repeticiones, explicaciones largas, pantallas de carga.
+- Deja completo el momento clave (el remate, la reacción, la jugada) y lo justo para entenderlo.
+- No cortes a mitad de palabra ni de frase: corta en las pausas, usando los segundos de las frases.
+- Cada parte de al menos 1.5 segundos; mejor pocas partes largas que muchas cortitas.
+- Si no hay voz, guíate por el volumen y las fotos (acción, reacciones, momentos fuertes).
+- resumen: una frase corta en español para el creador: qué dejaste y qué quitaste (máximo 120 letras).`;
+
+/** Recorte para una red: Sonnet (u Opus) mira lo que se dice, el volumen y unas fotos, y dice qué partes del clip se quedan. */
+export async function trimClip(prompt, images = [], precision = 'normal') {
+  const [model, effort] = PRECISION[precisionOf(precision)].trim;
+  const response = await getClient().beta.messages.create({
+    model,
+    max_tokens: model === OPUS ? 12000 : 3000,
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    output_config: { effort, format: { type: 'json_schema', schema: TRIM_SCHEMA } },
+    system: TRIM_SYSTEM,
+    messages: [{
+      role: 'user',
+      content: [
+        ...images.flatMap((img) => [
+          { type: 'text', text: `Foto del segundo ${img.t}:` },
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img.data } },
+        ]),
+        { type: 'text', text: cut(prompt) },
+      ],
+    }],
+  });
+  const data = readJson(response);
+  return {
+    partes: Array.isArray(data?.partes) ? data.partes : [],
+    resumen: typeof data?.resumen === 'string' ? data.resumen : '',
+    model: response.model || model,
     usage: response.usage,
   };
 }

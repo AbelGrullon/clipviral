@@ -72,11 +72,13 @@ export function archivosDeLaCopia(root = ROOT, incluir = INCLUIR) {
 /** Valores que nunca deben aparecer en la copia: lo que hay en tu server/.env y los correos de tus cuentas. */
 export async function secretosPropios(root = ROOT) {
   const values = new Set();
-  const envFile = path.join(root, 'server', '.env');
-  if (fs.existsSync(envFile)) {
+  // Las claves del servidor y el token del bot de Discord (si está configurado) no pueden aparecer en ningún archivo.
+  const NO_SECRETOS = new Set(['PORT', 'DATA_DIR', 'CLIPVIRAL_URL', 'CLIPVIRAL_WEB', 'ZONA_HORARIA']);
+  for (const envFile of [path.join(root, 'server', '.env'), path.join(root, 'discord-bot', '.env')]) {
+    if (!fs.existsSync(envFile)) continue;
     for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
       const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.+?)\s*$/);
-      if (m && m[1] !== 'PORT' && m[1] !== 'DATA_DIR' && m[2].length >= 6) values.add(m[2].replace(/^["']|["']$/g, ''));
+      if (m && !NO_SECRETOS.has(m[1]) && m[2].length >= 6) values.add(m[2].replace(/^["']|["']$/g, ''));
     }
   }
   const dbFile = path.join(process.env.DATA_DIR || path.join(root, 'server', 'data'), 'clipviral.db');

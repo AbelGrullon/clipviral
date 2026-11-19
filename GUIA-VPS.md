@@ -77,7 +77,7 @@ Entra a `https://cviral.duckdns.org/admin/` con tu correo y contraseña de siemp
   - La dirección de vuelta de PayPal (`https://cviral.duckdns.org`) ya la dejó puesta el instalador.
 - **Ajustes**:
   - **Días de prueba gratis** para cuentas nuevas. Pon **0** si quieres que paguen antes de usarla.
-  - Tu contacto de **soporte**, que sale en la web y en la app.
+  - Tu contacto de **soporte**, que sale en la web, en la app y en los correos. Déjalo **vacío** para que lleve al Discord de ClipViral (`https://discord.gg/2k4Q3bBMh`).
 - **Planes y precios**: revisa los precios que salen en la web y en la app.
 - **Correos** (opcional): la bienvenida, los avisos de vencimiento y los pagos.
 
@@ -86,15 +86,19 @@ Entra a `https://cviral.duckdns.org/admin/` con tu correo y contraseña de siemp
 1. Doble clic en **`Publicar versión de ClipViral.bat`**. Lo primero que pide es la dirección: escribe
    `cviral.duckdns.org` (la guarda para las próximas veces).
 2. Pulsa **Enter** para la versión que propone (por ejemplo 1.0.1). Cada vez que publicas, sube un número.
-3. Arma el instalador `ClipViral-Setup-1.0.1.exe` y el `.zip` para la web. Los deja en `desktop\dist-instalador`.
+3. Arma el instalador `ClipViral-Setup-1.0.1.exe` y lo deja en `desktop\dist-instalador`.
    - Ese instalador ya viene conectado a tu VPS.
 4. Pregunta si lo sube. Responde **S**, escribe qué trae la versión, tu correo y tu contraseña de administrador.
    - La contraseña no se ve al escribirla y no se guarda.
-5. Sube las dos cosas:
+5. Lo sube **una sola vez** y sirve para las dos cosas:
    - la **actualización**: las apps instaladas avisan **"Nueva versión disponible"** y se actualizan con un clic;
-   - la **descarga de la web**: el botón **Descargar** de `https://cviral.duckdns.org` baja la versión nueva.
+   - la **descarga de la web**: el VPS arma solo el `.zip`, y el botón **Descargar** de `https://cviral.duckdns.org` baja la versión nueva.
 
-También puedes subir los dos archivos a mano en el panel → **Actualizaciones** (arrastrar y soltar).
+También puedes subirlo a mano en el panel → **Actualizaciones**: suelta el `.exe` y deja marcada
+**"Usar este mismo instalador para la descarga de la web"**. Si alguna vez quieres un `.zip` distinto para la web,
+suéltalo en el otro cuadro.
+
+> La subida depende de la velocidad de **subida** de tu internet, que casi siempre es mucho menor que la de bajada.
 
 ---
 
@@ -119,6 +123,14 @@ En la web y en la app no aparece nada sobre pagos a mano.
 1. En el panel → **Usuarios** → **Gestionar** → **Hacer admin**.
 2. En menos de 3 minutos, su app muestra lo de administrador sin cerrar nada.
 3. **Quitar admin** lo quita igual.
+
+**Tu clave de Claude y los otros administradores:**
+
+- Un administrador nuevo **no usa tu clave** de Claude. Puede poner la suya en la app (**Ajustes → Clave de Claude**),
+  y lo que gaste se cobra en su cuenta.
+- Si quieres que use la tuya: panel → **Usuarios** → **Gestionar** → marca **"Puede usar tu clave de Claude"**.
+  Si tiene su propia clave puesta, igual usa la suya.
+- Tu clave (la del servidor) se cambia en el panel → **Ajustes**.
 
 **Membresías:** en **Usuarios** ves el plan de cada persona y hasta cuándo dura. Desde ahí puedes:
 

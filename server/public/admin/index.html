@@ -26,14 +26,15 @@
     <aside class="sidebar">
       <div class="brand"><span class="logo">▶</span> ClipViral <small>Admin</small></div>
       <nav id="nav">
-        <button data-tab="resumen" class="active"><i>📊</i> Resumen</button>
-        <button data-tab="usuarios"><i>👥</i> Usuarios</button>
-        <button data-tab="pagos"><i>💳</i> Pagos</button>
-        <button data-tab="correos"><i>✉️</i> Correos</button>
-        <button data-tab="planes"><i>💎</i> Planes y precios</button>
-        <button data-tab="versiones"><i>🚀</i> Actualizaciones</button>
-        <button data-tab="permisos"><i>📋</i> Permisos de redes</button>
-        <button data-tab="ajustes"><i>⚙️</i> Ajustes</button>
+        <button data-tab="resumen" class="active"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></i> Resumen</button>
+        <button data-tab="usuarios"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></svg></i> Usuarios</button>
+        <button data-tab="publicaciones"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M8.5 14l2.2 2.2 4.8-4.7"/></svg></i> Publicaciones</button>
+        <button data-tab="pagos"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6.5 15h4"/></svg></i> Pagos</button>
+        <button data-tab="correos"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 6.5l8.5 6.5 8.5-6.5"/></svg></i> Correos</button>
+        <button data-tab="planes"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l4 6-10 12L2 9z"/><path d="M2 9h20M12 21L8 9l4-6 4 6z"/></svg></i> Planes y precios</button>
+        <button data-tab="versiones"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 8l5-5 5 5M5 21h14"/></svg></i> Actualizaciones</button>
+        <button data-tab="permisos"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="18" rx="2.5"/><path d="M8 9l1.5 1.5L12 8M8 15l1.5 1.5L12 14M14.5 9.5H17M14.5 15.5H17"/></svg></i> Permisos de redes</button>
+        <button data-tab="ajustes"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></i> Ajustes</button>
       </nav>
       <div class="me">
         <div id="meName" class="me-name"></div>
@@ -47,12 +48,12 @@
         <header class="tab-head"><h1>Resumen</h1><span id="aiBadge" class="badge"></span></header>
         <div class="stats" id="stats"></div>
         <div class="grid2">
-          <div class="card"><h3>Registros (últimos 14 días)</h3><div id="chartSignups" class="bars"></div></div>
-          <div class="card"><h3>Costo de IA por día (USD)</h3><div id="chartAi" class="bars alt"></div></div>
+          <div class="card"><h3>Cobrado por día (USD)</h3><div id="chartIncome" class="bars"></div></div>
+          <div class="card"><h3>Clips sacados por día</h3><div id="chartClips" class="bars"></div></div>
         </div>
         <div class="grid2">
-          <div class="card"><h3>🎬 Clips sacados (últimos 14 días)</h3><div id="chartClips" class="bars"></div></div>
-          <div class="card"><h3>💳 Cobrado por día (USD)</h3><div id="chartIncome" class="bars alt"></div></div>
+          <div class="card"><h3>Registros por día</h3><div id="chartSignups" class="bars alt"></div></div>
+          <div class="card"><h3>Costo de IA por día (USD)</h3><div id="chartAi" class="bars alt"></div></div>
         </div>
         <div class="grid2">
           <div class="card"><h3>Clips por modo</h3><div id="clipsMode" class="pills"></div></div>
@@ -73,6 +74,26 @@
           <table>
             <thead><tr><th>Usuario</th><th>Plan</th><th>Vence</th><th>Clips</th><th>Pagado</th><th>Último acceso</th><th></th></tr></thead>
             <tbody id="usersBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Publicaciones que el servidor va a hacer -->
+      <div class="tab hidden" data-tab="publicaciones">
+        <header class="tab-head"><h1>Publicaciones</h1><span id="postsBadge" class="badge"></span></header>
+        <p class="muted tiny posts-intro">Lo que este servidor va a publicar solo, a su hora. Si el servidor está en tu VPS, se publica aunque la PC esté apagada. Esta lista se actualiza sola mientras la miras.</p>
+        <div class="card table-card">
+          <h3 style="padding:16px 16px 0">Por publicar</h3>
+          <table>
+            <thead><tr><th>Cuándo</th><th>Red</th><th>Clip</th><th>Cuenta</th><th>Estado</th><th></th></tr></thead>
+            <tbody id="postsNext"></tbody>
+          </table>
+        </div>
+        <div class="card table-card" style="margin-top:16px">
+          <h3 style="padding:16px 16px 0">Últimos 7 días</h3>
+          <table>
+            <thead><tr><th>Cuándo</th><th>Red</th><th>Clip</th><th>Cuenta</th><th>Resultado</th></tr></thead>
+            <tbody id="postsLast"></tbody>
           </table>
         </div>
       </div>
@@ -142,7 +163,7 @@
       <!-- Actualizaciones -->
       <div class="tab hidden" data-tab="versiones">
         <header class="tab-head"><h1>Actualizaciones</h1></header>
-        <p class="muted">Lo más fácil: en tu PC abre <b>Publicar versión de ClipViral.bat</b>. Arma el instalador y sube las dos cosas solo. Aquí lo puedes hacer a mano.</p>
+        <p class="muted">Lo más fácil: en tu PC abre <b>Publicar versión de ClipViral.bat</b>. Arma el instalador, lo sube una sola vez y la web queda con la misma versión. Aquí lo puedes hacer a mano.</p>
         <form id="releaseForm" class="card upload">
           <div class="drops">
             <label id="drop" class="drop">
@@ -155,9 +176,10 @@
               <input type="file" name="zip" accept=".zip" hidden />
               <span class="drop-icon">🌐</span>
               <strong id="dropZipText">Descarga de la web (.zip)</strong>
-              <small class="muted">Arrastra aquí el .zip con el instalador. Es lo que baja el botón "Descargar" de tu web.</small>
+              <small class="muted">Opcional: solo si quieres un .zip distinto. Es lo que baja el botón "Descargar" de tu web.</small>
             </label>
           </div>
+          <label class="check" id="webSame"><input type="checkbox" name="web" checked /> Usar este mismo instalador para la descarga de la web (no hace falta subir el .zip)</label>
           <p class="muted tiny" id="webNow" style="margin:6px 0 0"></p>
           <div class="row">
             <label>Versión<input name="version" placeholder="1.0.1" required pattern="v?\d+\.\d+\.\d+" /></label>
@@ -185,7 +207,9 @@
           <h3 class="with-badge">🔑 Clave de Claude (IA Pro) <span id="claudeBadge" class="badge"></span></h3>
           <p class="muted">La IA Pro usa tu propia cuenta de Claude: lo que gaste se cobra ahí. Crea la clave en
             <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com → API Keys</a>
-            y ten saldo en Billing. Se guarda cifrada en este servidor y nunca se muestra completa.</p>
+            y ten saldo en Billing. Se guarda cifrada en este servidor y nunca se muestra completa.
+            La usas tú y los administradores a los que les marques <b>"Puede usar tu clave de Claude"</b> (Usuarios → Gestionar).
+            Los demás administradores pueden poner su propia clave en la app (Ajustes).</p>
           <p id="claudeNow" class="tiny"></p>
           <label>Clave nueva<input name="key" type="password" spellcheck="false" placeholder="sk-ant-…" /></label>
           <div class="btn-row">
@@ -197,8 +221,8 @@
 
         <form id="settingsForm" class="card form">
           <label>Días de prueba gratis para cuentas nuevas<input name="trial_days" type="number" min="0" max="60" /></label>
-          <label>Enlace de pago (PayPal, Stripe, WhatsApp…). Se abre al tocar "Comprar" en la app<input name="payment_link" placeholder="https://…" /></label>
-          <label>Contacto de soporte<input name="support_contact" placeholder="WhatsApp o correo" /></label>
+          <label>Enlace de pago (PayPal, Stripe…). Se abre al tocar "Comprar" en la app<input name="payment_link" placeholder="https://…" /></label>
+          <label>Contacto de soporte<input name="support_contact" placeholder="Vacío = Discord de ClipViral (discord.gg/2k4Q3bBMh)" /></label>
           <label>Anuncio para todos los usuarios (sale arriba en la app)<input name="announcement" placeholder="Ej.: ¡Nueva función de subtítulos!" /></label>
           <h3 style="margin:14px 0 0">🏢 Datos para las páginas legales</h3>
           <p class="muted tiny" style="margin:0">Salen en la política de privacidad, los términos y la página de borrar datos (<a href="/privacidad" target="_blank">ver</a>). TikTok y Meta las revisan.</p>

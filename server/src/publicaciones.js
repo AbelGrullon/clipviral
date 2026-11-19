@@ -262,6 +262,53 @@ export function startPublisher() {
   soon();
 }
 
+// ---------- Panel de admin: lo que el servidor va a publicar ----------
+const adminRow = (r) => {
+  const d = parse(r.data);
+  return {
+    ...publicPost(r),
+    user: { id: r.user_id, email: r.email, name: r.name, role: r.role },
+    title: d.title || '', caption: String(d.caption || '').slice(0, 280), duration: Number(d.duration) || 0,
+    recorte: d.note || null, // por ejemplo: "Claude dejó lo mejor en 39 s para Instagram"
+    conVideo: hasFile(r.user_id, r.file_hash),
+    // El servidor solo publica lo de cuentas de administrador.
+    sePublica: r.role === 'admin',
+  };
+};
+
+/** Lo programado en el servidor (de todas las cuentas) y lo que pasó en los últimos 7 días. */
+export function adminPosts(now = Date.now()) {
+  const sql = (where, order) => `SELECT p.*, u.email, u.name, u.role FROM posts p JOIN users u ON u.id = p.user_id WHERE ${where} ORDER BY ${order}`;
+  return {
+    activo: started && canPublish(),
+    puede: canPublish(),
+    proximas: db.prepare(sql(`p.status IN ('pendiente', 'subiendo', 'tarde')`, 'p.scheduled_at LIMIT 300')).all().map(adminRow),
+    recientes: db.prepare(sql(`p.status IN ('publicado', 'error', 'cancelado') AND p.updated_at > ?`, 'p.updated_at DESC LIMIT 60')).all(now - 7 * 24 * HOUR).map(adminRow),
+  };
+}
+
+const findPost = (id) => {
+  const row = getPost(String(id));
+  if (!row) throw Object.assign(new Error('No encontré esa publicación'), { status: 404 });
+  return row;
+};
+/** El admin cancela una publicación de cualquier cuenta (si todavía no se está subiendo). */
+export function adminCancel(id) {
+  const row = findPost(id);
+  if (row.status === 'subiendo') throw Object.assign(new Error('Ya se está publicando: no se puede cancelar'), { status: 409 });
+  if (!['pendiente', 'tarde', 'error'].includes(row.status)) throw Object.assign(new Error('Esa publicación ya no está programada'), { status: 409 });
+  setPost(row.id, { status: 'cancelado', progress: 0, note: 'Cancelada desde el panel de admin' });
+  return publicPost(getPost(row.id));
+}
+/** El admin la manda a publicar ya. */
+export function adminNow(id) {
+  const row = findPost(id);
+  if (!['pendiente', 'tarde'].includes(row.status)) throw Object.assign(new Error('Esa publicación ya no está programada'), { status: 409 });
+  setPost(row.id, { status: 'pendiente', scheduled_at: Date.now(), reprogramar: 0, note: null });
+  soon();
+  return publicPost(getPost(row.id));
+}
+
 // ---------- Rutas (/api/publicaciones) ----------
 export const postRoutes = Router();
 // Publicar solo, a su hora: solo administradores.

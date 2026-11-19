@@ -13,7 +13,9 @@ const { checkSystem, findOllama, freeSpace } = require('./engine/requisitos');
 const perf = require('./engine/rendimiento');
 const { UploadQueue } = require('./engine/subidas');
 const { UPLOADERS, buildCaption, tiktokCreatorInfo } = require('./engine/redes');
-const { autoPlan, checkTiktokApproval, tiktokPostOptions, igTrimNeeded, igTrimArgs, AUTO_REDES, SOLA_REDES, IG_TRIM_SECONDS } = require('./engine/publicar');
+const { autoPlan, checkTiktokApproval, tiktokPostOptions, AUTO_REDES, SOLA_REDES } = require('./engine/publicar');
+const { trimTarget, smartTrim } = require('./engine/recorte');
+const { transcribeSegment } = require('./engine/transcribe');
 const { nextSlot } = require('./engine/calendario');
 const { Vigilante, channelUrl } = require('./engine/vigilante');
 const { Sugerencias, buildSnapshot } = require('./engine/sugerencias');
@@ -120,6 +122,8 @@ const DEFAULTS = {
   subColor: 'amarillo',
   sensitivity: 'media',
   maxPerHour: 8,
+  // IA Pro: qué tan fino trabaja Claude ('normal', 'alta' u 'maxima'). Más precisión = más caro y un poco más lento.
+  precision: 'normal',
   whisperModel: 'small',
   language: 'auto',
   whisperGpu: true,
@@ -442,19 +446,33 @@ async function relayPut(file) {
 }
 
 /**
- * Instagram: si el clip dura más de 40 s (y el ajuste está encendido), sube una copia de los primeros 39 s.
+ * Instagram (más de 40 s, si el ajuste está encendido) y Facebook (más de 90 s): se sube una copia más corta.
+ * Claude mira el clip y deja lo más interesante con cortes saltados; sin Claude, el principio del clip.
  * La copia va a una carpeta temporal y se borra al terminar. El clip original no cambia.
  */
-async function igTrimCopy(job) {
-  if (!igTrimNeeded(job, getSettings().redes.instagram?.recortar)) return null;
-  const out = path.join(os.tmpdir(), `clipviral-instagram-${job.id}.mp4`);
-  try {
-    await run(components.paths.ffmpeg, igTrimArgs(job.file, out), { timeoutMs: 5 * 60000 });
-  } catch (err) {
-    fs.rmSync(out, { force: true });
-    throw Object.assign(new Error(`No se pudo recortar el clip para Instagram: ${String(err.message).slice(0, 200)}`), { status: 400 });
-  }
-  return { file: out, duration: IG_TRIM_SECONDS, note: `Recortado a ${IG_TRIM_SECONDS} s para Instagram`, cleanup: () => fs.rmSync(out, { force: true }) };
+const trimCache = new Map(); // qué partes dejar de cada clip (para no preguntarle a Claude otra vez en un reintento)
+async function trimCopy(job, onNote) {
+  const target = trimTarget(job, getSettings().redes);
+  if (!target) return null;
+  const s = getSettings();
+  const st = components.status();
+  const whisperOk = !!st.whisper && !!st.models?.[s.whisperModel]?.installed;
+  const transcribe = async (file, dir) => {
+    if (!whisperOk) return null;
+    const opts = { ffmpeg: components.paths.ffmpeg, whisper: components.paths.whisper, model: components.paths.model(s.whisperModel), language: s.language || 'auto' };
+    const useGpu = st.whisperFlavor === 'gpu' && s.whisperGpu;
+    return transcribeSegment({ ...opts, useGpu }, file, dir).catch((err) => (useGpu ? transcribeSegment({ ...opts, useGpu: false }, file, dir) : Promise.reject(err)));
+  };
+  if (trimCache.size > 200) trimCache.clear();
+  return smartTrim(job, target, {
+    ffmpeg: components.paths.ffmpeg,
+    transcribe,
+    ask: (body) => api('/ai/recorte', { ...body, precision: s.precision }, 'POST', 5 * 60000),
+    gpu: gpu.hasNvidia && s.gpuEncode,
+    tmpDir: os.tmpdir(),
+    onNote,
+    cache: trimCache,
+  });
 }
 
 /** La PC estaba apagada a la hora sugerida: la próxima hora buena de esa red (sin chocar con otras subidas). */
@@ -494,7 +512,7 @@ function setupUploads() {
     getToken: (platform) => api(`/social/${platform}/token`, {}),
     onResult: (platform, ok) => api(`/social/${platform}/log`, { ok }).catch(() => {}),
     relay: { put: relayPut, remove: (id) => api(`/social/relay/${id}`, null, 'DELETE') },
-    prepare: igTrimCopy,
+    prepare: trimCopy,
     onLate: lateSlot,
     remote: remotePublisher,
   });
@@ -707,8 +725,13 @@ let learned = null;
 
 /** Corre yt-dlp con Deno y devuelve el JSON. */
 async function ytdlpJson(args, timeoutMs = 90000) {
-  const { out } = await run(components.paths.ytdlp, [...components.paths.ytdlpArgs(), ...args], { timeoutMs });
-  return JSON.parse(out);
+  try {
+    const { out } = await run(components.paths.ytdlp, [...components.paths.ytdlpArgs(), ...args], { timeoutMs });
+    return JSON.parse(out);
+  } catch (err) {
+    checkCookiesNeeded(`${err.err || ''} ${err.message || ''}`);
+    throw err;
+  }
 }
 
 function setupPiloto() {
@@ -726,7 +749,7 @@ function setupPiloto() {
     },
   });
   vigilante.on('update', () => send('piloto:update', vigilante.snapshot()));
-  vigilante.on('log', (l) => send('piloto:log', l));
+  vigilante.on('log', (l) => { send('piloto:log', l); checkCookiesNeeded(l?.text); });
   vigilante.on('process', async (cand) => {
     try {
       await startSession({ url: cand.url }, { type: 'piloto', candidateId: cand.id, source: cand.source, kind: cand.kind });
@@ -1201,13 +1224,13 @@ ipcMain.handle('pay:start', async (e, { plan, months }) => {
   return { outcome: result, id: order.id, payment: check.payment || null, error: check.error || null };
 });
 
-// ---------- Clave de Claude (solo administradores) ----------
-// La clave va directo al servidor de esta PC, que la prueba y la guarda cifrada. La app no la guarda.
-// El admin pone la clave del servidor; cada cliente del plan Claude pone la suya (se guarda cifrada en su cuenta).
-const claudeKeyPath = async () => ((await api('/me')).user.role === 'admin' ? '/admin/claude' : '/me/claude');
-ipcMain.handle('claude:status', async () => api(await claudeKeyPath()));
-ipcMain.handle('claude:save', async (e, key) => api(await claudeKeyPath(), { key: String(key || '') }, 'PUT'));
-ipcMain.handle('claude:remove', async () => api(await claudeKeyPath(), null, 'DELETE'));
+// ---------- Clave de Claude (IA Pro) ----------
+// La clave va directo al servidor, que la prueba y la guarda cifrada en la cuenta. La app no la guarda.
+// Cada cuenta pone la suya (cliente del plan Claude o admin). Un admin sin clave propia usa la del servidor si el dueño
+// se lo permite (panel → Usuarios → Gestionar). La clave del servidor se cambia en el panel → Ajustes.
+ipcMain.handle('claude:status', async () => api('/me/claude'));
+ipcMain.handle('claude:save', async (e, key) => api('/me/claude', { key: String(key || '') }, 'PUT'));
+ipcMain.handle('claude:remove', async () => api('/me/claude', null, 'DELETE'));
 
 // ---------- Ajustes ----------
 ipcMain.handle('settings:get', () => getSettings());
@@ -1262,11 +1285,26 @@ function cleanCookiesText(text) {
   if (!rows.some((r) => /youtube\.com\t/i.test(r))) throw new Error('Ese archivo no tiene cookies de youtube.com. Exporta estando en youtube.com con tu sesión iniciada.');
   return `# Netscape HTTP Cookie File\n${rows.join('\n')}\n`;
 }
+/**
+ * ¿YouTube pide las cookies (o las que hay ya no sirven)? Entonces se abre la pantalla que explica cómo exportarlas
+ * desde Chrome o Edge y subirlas. Como mucho una vez cada 10 minutos, para no molestar.
+ */
+const COOKIES_NEEDED = /sign in to confirm|not a bot|no eres un robot|cookies are no longer valid|netscape format|does not look like a Netscape|archivo de cookies no sirve|could not (copy|find).*cookie|failed to decrypt|DPAPI|No pude leer las cookies/i;
+let cookiesAskedAt = 0;
+function checkCookiesNeeded(text) {
+  if (!COOKIES_NEEDED.test(String(text || '')) || Date.now() - cookiesAskedAt < 10 * 60000) return;
+  cookiesAskedAt = Date.now();
+  const mode = getSettings().ytCookies || '';
+  // vencidas: ya había un archivo y YouTube igual lo pide (YouTube cambia las cookies cada cierto tiempo).
+  send('cookies:needed', { mode, vencidas: mode === 'archivo' && fs.existsSync(COOKIES_FILE) });
+}
+ipcMain.handle('cookies:guide-seen', () => { cookiesAskedAt = Date.now(); });
+
 // Si ya habías elegido un archivo que yt-dlp rechazaba, se arregla solo al abrir la app.
 try { if (fs.existsSync(COOKIES_FILE)) fs.writeFileSync(COOKIES_FILE, cleanCookiesText(fs.readFileSync(COOKIES_FILE, 'utf8'))); } catch {}
 ipcMain.handle('cookies:info', () => ({ mode: getSettings().ytCookies || '', file: fs.existsSync(COOKIES_FILE) }));
 ipcMain.handle('cookies:pick', async () => {
-  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'cookies.txt', extensions: ['txt'] }] });
+  const r = await dialog.showOpenDialog(win, { defaultPath: app.getPath('downloads'), properties: ['openFile'], filters: [{ name: 'cookies.txt', extensions: ['txt'] }] });
   if (r.canceled) return null;
   fs.writeFileSync(COOKIES_FILE, cleanCookiesText(fs.readFileSync(r.filePaths[0], 'utf8')));
   writeJson(files.settings, deepMerge(readJson(files.settings, {}), { ytCookies: 'archivo' }));
@@ -1452,7 +1490,7 @@ async function startSession(opts, origin = null) {
   sessionLogs = [];
   session = new ClipSession({
     url: s.url, mode: s.mode, clipSeconds: Number(s.clipSeconds), style: s.style, subtitles: s.subtitles, look: s.look,
-    sensitivity: s.sensitivity, maxPerHour: Number(s.maxPerHour), outputDir: s.outputDir,
+    sensitivity: s.sensitivity, maxPerHour: Number(s.maxPerHour), precision: s.precision, outputDir: s.outputDir,
     workRoot: path.join(userData, 'trabajo'), paths: components.paths, whisperModel: s.whisperModel, language: s.language,
     whisperGpu: st.whisperFlavor === 'gpu' && s.whisperGpu, gpuEncode: gpu.hasNvidia && s.gpuEncode,
     ollamaModel: s.mode === 'local' ? s.ollamaModel : '', api, origin,
@@ -1468,7 +1506,7 @@ async function startSession(opts, origin = null) {
   });
   const current = session;
   if (origin) send('engine:started', { origin, url: s.url });
-  current.on('log', (l) => { sessionLogs.push(l); if (sessionLogs.length > 300) sessionLogs.shift(); send('engine:log', l); });
+  current.on('log', (l) => { sessionLogs.push(l); if (sessionLogs.length > 300) sessionLogs.shift(); send('engine:log', l); checkCookiesNeeded(l?.text); });
   current.on('stats', (st2) => send('engine:stats', st2));
   current.on('activity', (a) => send('engine:activity', a));
   current.on('producing', (p) => send('engine:producing', p));
@@ -1500,6 +1538,7 @@ async function startSession(opts, origin = null) {
     current.state = 'done';
     if (blocker !== null) { powerSaveBlocker.stop(blocker); blocker = null; }
     session = null;
+    checkCookiesNeeded(err.message);
     throw err;
   }
   return current.stats();

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, currentPeriod, planInfo } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { withKey, aiErrorMessage, scanWindow, pickClips, rankVideos, competitorReport, findCamera, costOf, cut } from '../claude.js';
+import { withKey, aiErrorMessage, scanWindow, pickClips, rankVideos, competitorReport, findCamera, trimClip, costOf, cut, precisionOf } from '../claude.js';
 import { cleanPickedClip } from '../textos.js';
 import { keyForUser } from '../clave.js';
 
@@ -90,7 +90,7 @@ PICOS DETECTADOS EN LA PC (volumen o chat):
 ${peaks || 'ninguno'}`;
 
   try {
-    const result = await scanWindow(prompt);
+    const result = await scanWindow(prompt, precisionOf(body.precision));
     const cost = logUsage(req.user.id, 'scan', result.model, result.usage, seconds);
     addSeconds(req.user, seconds);
     const candidates = result.candidates
@@ -103,7 +103,10 @@ ${peaks || 'ninguno'}`;
   }
 });
 
-/** Paso 2: Sonnet revisa los candidatos buenos y devuelve los clips finales con título, hashtags y el texto de cada red. */
+/**
+ * Paso 2: Sonnet (u Opus, según la precisión) revisa los candidatos buenos y devuelve los clips finales con título,
+ * hashtags y el texto de cada red. Los que pidió el streamer ("saca ese clip") vienen marcados y van siempre.
+ */
 router.post('/pick', async (req, res) => {
   const plan = checkAccess(req, res);
   if (!plan) return;
@@ -114,8 +117,11 @@ router.post('/pick', async (req, res) => {
   const blocks = candidates.map((c, i) => {
     const lines = (Array.isArray(c.transcript) ? c.transcript : []).slice(0, 400)
       .map((l) => `  [${Math.round(Number(l.t) || 0)}] ${clean(l.text, 300)}`).join('\n');
+    const pedido = c.pedido && typeof c.pedido === 'object'
+      ? `PEDIDO POR ${c.pedido.quien === 'chat' ? 'EL CHAT' : 'EL STREAMER'}: "${clean(c.pedido.frase, 80)}" en el segundo ${Math.round(Number(c.pedido.t) || 0)}. Lo que hay que sacar pasó justo antes.\n`
+      : '';
     return `### Candidato ${clean(c.id ?? i, 20)} (segundos ${Math.round(c.start)} a ${Math.round(c.end)}, nota previa ${Number(c.score) || 0})
-Motivo: ${clean(c.reason, 300)}
+${pedido}Motivo: ${clean(c.reason, 300)}
 Chat: ${clean(c.chatSummary, 400) || 'sin datos'}
 Transcripción:
 ${lines}`;
@@ -129,7 +135,7 @@ ${hints ? `\nLO QUE MEJOR FUNCIONA EN SUS REDES (según sus estadísticas):\n${h
 ${blocks}`;
 
   try {
-    const result = await pickClips(prompt);
+    const result = await pickClips(prompt, precisionOf(body.precision));
     const cost = logUsage(req.user.id, 'pick', result.model, result.usage, 0);
     const clips = result.clips.map(cleanPickedClip).filter(Boolean);
     res.json({ clips, costUsd: cost });
@@ -154,6 +160,46 @@ router.post('/camara', async (req, res) => {
   } catch (err) {
     console.error('Error en /ai/camara:', err?.status, err?.message);
     res.status(502).json({ error: aiErrorMessage(err, 'La IA no pudo buscar la cámara.') });
+  }
+});
+
+/**
+ * Recorte para una red (Instagram 39 s, Facebook 88 s): Sonnet mira el clip (lo que se dice, el volumen y unas fotos)
+ * y dice qué partes se quedan. No descuenta horas (cuesta 1 o 2 centavos).
+ */
+router.post('/recorte', async (req, res) => {
+  if (!checkAccess(req, res)) return;
+  const body = req.body || {};
+  const num = (x) => Number((Number(x) || 0).toFixed(1));
+  const duracion = Number(body.duracion) || 0;
+  const maximo = Math.floor(Number(body.maximo) || 0);
+  if (!(duracion > 0 && duracion <= 1800) || !(maximo >= 3 && maximo < duracion)) return res.status(400).json({ error: 'Datos del clip no válidos' });
+  const minimo = Math.max(3, Math.round(maximo * 0.75));
+  const frases = (Array.isArray(body.frases) ? body.frases : []).slice(0, 600)
+    .map((f) => `[${num(f?.s)}–${num(f?.e)}] ${clean(f?.texto, 300)}`).join('\n');
+  const volumen = String(body.volumen ?? '').replace(/[^0-9]/g, '').slice(0, 1800);
+  const images = (Array.isArray(body.fotos) ? body.fotos : []).slice(0, 24)
+    .filter((f) => typeof f?.data === 'string' && f.data.length < 200_000 && /^[A-Za-z0-9+/=]+$/.test(f.data))
+    .map((f) => ({ t: num(f.t), data: f.data }));
+  const red = { instagram: 'Instagram', facebook: 'Facebook' }[body.red] || 'La red';
+  const prompt = `Clip: ${clean(body.titulo, 200) || 'sin título'}
+Dura ${num(duracion)} s. ${red} acepta como máximo ${maximo} s.
+Deja entre ${minimo} y ${maximo} segundos en total.
+
+LO QUE SE DICE ([inicio–fin] en segundos):
+${frases || 'no se entiende voz: guíate por el volumen y las fotos'}
+
+VOLUMEN POR SEGUNDO (un dígito por segundo, desde el segundo 0):
+${volumen || 'sin datos'}`;
+  try {
+    const result = await trimClip(prompt, images, precisionOf(body.precision));
+    const cost = logUsage(req.user.id, 'recorte', result.model, result.usage, 0);
+    const partes = result.partes.map((p) => ({ inicio: Number(p?.inicio), fin: Number(p?.fin) }))
+      .filter((p) => Number.isFinite(p.inicio) && Number.isFinite(p.fin) && p.fin > p.inicio).slice(0, 40);
+    res.json({ partes, resumen: clean(result.resumen, 160).trim(), costUsd: cost });
+  } catch (err) {
+    console.error('Error en /ai/recorte:', err?.status, err?.message);
+    res.status(502).json({ error: aiErrorMessage(err, 'La IA no pudo elegir qué partes dejar.') });
   }
 });
 

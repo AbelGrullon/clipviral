@@ -115,8 +115,14 @@ addColumn('social_accounts', 'extra', 'TEXT');
 addColumn('social_accounts', 'scope_v', 'INTEGER NOT NULL DEFAULT 1');
 // owner_ids: los ID de la persona en esa red (",id1,id2,"). Con ellos se borra la cuenta si la persona quita el permiso desde la red.
 addColumn('social_accounts', 'owner_ids', 'TEXT');
-// claude_key: la clave de Claude de cada cliente (cifrada). El plan Claude usa la del cliente; el admin, la del servidor.
+// claude_key: la clave de Claude propia de cada cuenta (cifrada). El plan Claude usa la del cliente; un admin, la suya si la puso.
 addColumn('users', 'claude_key', 'TEXT');
+// clave_servidor: 1 = este admin puede usar la clave de Claude del servidor (la del dueño) cuando no tiene la suya.
+// Los admins que ya existían la siguen usando; a uno nuevo se la das en el panel (Usuarios → Gestionar).
+if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'clave_servidor')) {
+  db.exec('ALTER TABLE users ADD COLUMN clave_servidor INTEGER NOT NULL DEFAULT 0');
+  db.exec("UPDATE users SET clave_servidor = 1 WHERE role = 'admin'");
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS ai_reports (
@@ -281,6 +287,13 @@ export function getSetting(key, fallback = '') {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return row ? row.value : fallback;
 }
+
+/** Soporte: lo que el admin puso en "Contacto de soporte"; si está vacío, el Discord de ClipViral (ahí el bot abre un ticket). */
+export const SOPORTE_DISCORD = 'https://discord.gg/2k4Q3bBMh';
+export function supportContact() {
+  return String(getSetting('support_contact') || '').trim() || SOPORTE_DISCORD;
+}
+export const esEnlace = (v) => /^https?:\/\//i.test(String(v || ''));
 
 export function setSetting(key, value) {
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')

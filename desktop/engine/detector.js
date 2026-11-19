@@ -7,6 +7,56 @@ const LAUGH_CHAT = /(ja(ja)+|je(je)+|xd+|lol+|lmao|kek|😂|🤣|💀)/i;
 const SENSITIVITY = { baja: 3.0, media: 2.2, alta: 1.6 };
 const CHAT_LAG = 8; // el chat reacciona unos segundos después
 
+// ---------- "Saca ese clip": el streamer (o el chat) pide un clip de lo que acaba de pasar ----------
+/** Minúsculas, sin acentos ni signos (deja el ! de los comandos del chat). */
+function plain(text) {
+  return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9!\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+const CLIP = 'cl[iy]pp?';
+const RELLENO = '(?: (?:ese|este|eso|esto|esa|esta|un|una|el|la|ahi|aqui|me|nos|lo|le|les|de|en|mi|buen)){0,3}';
+// Se busca sobre el texto sin acentos (ver plain): "sácame" queda "sacame", "that's" queda "that s".
+const PIDE_CLIP = new RegExp([
+  // saca ese clip · sácame un clip · saquen clip · hay que sacar clip de eso
+  `\\b(?:saca|sacame|sacale|sacalo|saquen|saquenme|saquenle|saquenlo|sacad|sacar|sacamos|saquemos)${RELLENO} ${CLIP}\\b`,
+  // hazle un clip · hagan clip · hay que hacer clip
+  `\\b(?:haz|hazle|hazme|hagan|haganle|haganme|hagamos|hacer|haced|hacele)${RELLENO} ${CLIP}\\b`,
+  // clipea eso · clipéalo · clipeen · que alguien lo clipee · clipiá
+  `\\b${CLIP}(?:e|i)(?:a|alo|ala|ame|ar|amos|emos|e|en|enlo|enla|enme|elo|ado)\\b`,
+  // clip eso · clip that · clip it
+  `\\b${CLIP} (?:eso|esto|that|this|it)\\b`,
+  // eso es clip · eso va pa clip · esto merece un clip · qué clipazo
+  `\\b(?:eso|esto|esa|esta) (?:es|fue|va|va a ser|seria|sera|merece|pide|tiene que ser)(?: (?:pa|para|de))?(?: (?:un|una))? ${CLIP}\\b`,
+  `\\b${CLIP}azo\\b`,
+  // that's a clip · that was a clip
+  `\\bthat ?s (?:a )?${CLIP}\\b`,
+  `\\bthat (?:is|was) (?:a )?${CLIP}\\b`,
+].join('|'), 'g');
+const NEGADO = /(?:^|\s)(?:no|ni|nunca|not|never|dont|don t)(?: (?:lo|le|la|les|me|nos|se))?\s*$/;
+// "saca el clip de ayer", "esto es un clip que vi…": habla de otro clip, no de lo que acaba de pasar.
+const OTRO_CLIP = /^ (?:de|del) (?:ayer|antes|la semana|el otro|otro|hace|cuando)\b|^ (?:que vi|que me pasaron|que les|sobre)\b/;
+const CHAT_PIDE = /(?:^|\s)!clip\b|^(?:cl[iy]+p+(?:\s|!)*)+$/;
+
+/** Busca pedidos de clip en un texto ya pasado por plain(). Devuelve [{ desde, hasta }] (posiciones en el texto). */
+function findRequests(text) {
+  const out = [];
+  for (const m of text.matchAll(PIDE_CLIP)) {
+    const desde = m.index;
+    const hasta = m.index + m[0].length;
+    if (NEGADO.test(text.slice(Math.max(0, desde - 16), desde))) continue;
+    if (OTRO_CLIP.test(text.slice(hasta, hasta + 30))) continue;
+    out.push({ desde, hasta });
+  }
+  return out;
+}
+
+/** ¿Este texto pide un clip? ("saca ese clip", "clipéalo", "!clip"…). */
+function pideClip(text) {
+  const p = plain(text);
+  return CHAT_PIDE.test(p) || findRequests(p).length > 0;
+}
+
 function median(arr) {
   if (!arr.length) return 0;
   const s = [...arr].sort((a, b) => a - b);
@@ -50,8 +100,58 @@ class Timeline {
     return best;
   }
 
-  addChat(t, text) {
-    if (t >= 0) this.chat.push({ t, text });
+  /** who: { author, rol } (rol: 'dueño' o 'mod' si el mensaje es del dueño del canal o de un moderador). */
+  addChat(t, text, who = {}) {
+    if (t >= 0) this.chat.push({ t, text, author: who.author || '', rol: who.rol || '' });
+  }
+
+  /**
+   * Pedidos de clip entre a y b: el streamer dice "saca ese clip" (o algo parecido), el dueño o un moderador
+   * escribe !clip en el chat, o 3 personas del chat lo piden en 20 s. Lo que hay que sacar pasó justo ANTES del pedido.
+   * Devuelve [{ t, quien: 'streamer'|'chat', frase }] en orden, uno solo por cada 25 s.
+   */
+  clipRequests(a, b) {
+    const found = [];
+    // Lo que dice el streamer (un poco antes de a, por si la frase quedó partida entre dos pedazos).
+    const ws = this.wordsBetween(a - 8, b);
+    let text = '';
+    const pos = []; // [posición en el texto, índice de la palabra]
+    ws.forEach((w, i) => {
+      const p = plain(w.w);
+      if (!p) return;
+      if (text) text += ' ';
+      pos.push([text.length, i]);
+      text += p;
+    });
+    const wordAt = (at) => pos.findLast(([p]) => p <= at)?.[1] ?? 0;
+    for (const r of findRequests(text)) {
+      const i = wordAt(r.desde);
+      const frase = ws.slice(i, wordAt(r.hasta - 1) + 1).map((w) => w.w).join(' ').replace(/^[¿¡"'(]+|[.,;:!?"')]+$/g, '');
+      found.push({ t: ws[i].s, quien: 'streamer', frase });
+    }
+    // El chat: si lo escribe el dueño o un moderador basta una vez; si no, hacen falta 3 personas en 20 s.
+    const msgs = this.chatBetween(a - 20, b).filter((c) => pideClip(c.text));
+    for (const c of msgs) {
+      if (c.rol) found.push({ t: c.t - 2, quien: c.rol === 'dueño' ? 'streamer' : 'chat', frase: c.text.trim().slice(0, 60) });
+    }
+    const gente = msgs.filter((c) => !c.rol);
+    for (let i = 0; i < gente.length; i++) {
+      const grupo = gente.filter((c) => c.t >= gente[i].t && c.t - gente[i].t <= 20);
+      if (new Set(grupo.map((c) => c.author || c.text)).size < 3) continue;
+      found.push({ t: gente[i].t - 4, quien: 'chat', frase: gente[i].text.trim().slice(0, 60) });
+      i += grupo.length - 1;
+    }
+    found.sort((x, y) => x.t - y.t);
+    const out = [];
+    for (const r of found) {
+      const last = out[out.length - 1];
+      if (last && r.t - last.t < 25) {
+        if (r.quien === 'streamer' && last.quien !== 'streamer') Object.assign(last, { quien: 'streamer', frase: r.frase });
+        continue;
+      }
+      out.push({ ...r, t: Math.max(0, r.t) });
+    }
+    return out;
   }
 
   wordsBetween(a, b) {
@@ -198,4 +298,4 @@ class Timeline {
   }
 }
 
-module.exports = { Timeline, SENSITIVITY, HYPE_CHAT, LAUGH_CHAT };
+module.exports = { Timeline, SENSITIVITY, HYPE_CHAT, LAUGH_CHAT, pideClip };

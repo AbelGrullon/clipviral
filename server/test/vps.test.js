@@ -27,7 +27,10 @@ test('la dirección del VPS', () => {
 test('la copia para el VPS: el servidor y el código de subida, sin datos sueltos ni la app de escritorio', () => {
   const files = archivosDeLaCopia(ROOT, INCLUIR_VPS);
   for (const must of ['Instalar en el VPS.bat', 'GUIA-VPS.md', 'server/src/publicaciones.js', 'server/scripts/vps.js', 'server/scripts/vps-servicio.js',
-    'desktop/engine/redes.js', 'desktop/engine/util.js', 'desktop/engine/publicar.js', 'server/package-lock.json']) {
+    'desktop/engine/redes.js', 'desktop/engine/util.js', 'desktop/engine/publicar.js', 'server/package-lock.json',
+    // El bot de Discord va en la misma copia (sin su .env con el token, ni sus datos, ni sus pruebas).
+    'Instalar bot de Discord en el VPS.bat', 'GUIA-DISCORD.md', 'discord-bot/src/index.js', 'discord-bot/scripts/servicio.js',
+    'discord-bot/scripts/configurar.js', 'discord-bot/package-lock.json', 'discord-bot/.env.example']) {
     assert.ok(files.includes(must), `falta ${must}`);
   }
   assert.ok(!files.some((f) => /(^|\/)(\.env|data|node_modules|test|https)(\/|$)/.test(f) || f.endsWith('.db') || f.endsWith('secret.key')), 'sin datos sueltos');

@@ -102,8 +102,9 @@ async function start() {
 }
 
 // ---------- Pestañas ----------
-const loaders = { resumen: loadStats, usuarios: loadUsers, pagos: loadPayments, correos: loadMail, planes: loadPlans, versiones: loadReleases, permisos: loadChecklist, ajustes: loadSettings };
+const loaders = { resumen: loadStats, usuarios: loadUsers, publicaciones: loadPosts, pagos: loadPayments, correos: loadMail, planes: loadPlans, versiones: loadReleases, permisos: loadChecklist, ajustes: loadSettings };
 function showTab(name) {
+  if (name !== 'publicaciones') clearTimeout(postsTimer);
   $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach((t) => {
     const show = t.dataset.tab === name;
@@ -118,15 +119,56 @@ $('#nav').addEventListener('click', (e) => {
 });
 
 // ---------- Resumen ----------
-function bars(el, rows, key, format) {
+// Los últimos 14 días (el último es hoy), con 0 en los días sin datos.
+function ultimos14(rows, key) {
+  const map = Object.fromEntries(rows.map((r) => [r.day, r[key] || 0]));
   const days = [];
   for (let i = 13; i >= 0; i--) days.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
-  const map = Object.fromEntries(rows.map((r) => [r.day, r[key] || 0]));
-  const max = Math.max(1e-9, ...days.map((d) => map[d] || 0));
-  el.innerHTML = days.map((d, i) => {
-    const v = map[d] || 0;
-    return `<div class="bar" title="${d}: ${format(v)}"><b>${v ? format(v) : ''}</b><span style="height:${(v / max) * 100}%;animation-delay:${i * 35}ms"></span><small>${d.slice(8)}</small></div>`;
-  }).join('');
+  return days.map((d) => [d, map[d] || 0]);
+}
+
+function bars(el, rows, key, format) {
+  const days = ultimos14(rows, key);
+  const max = Math.max(1e-9, ...days.map(([, v]) => v));
+  const total = days.reduce((a, [, v]) => a + v, 0);
+  el.innerHTML = `<div class="sum"><b>${format(total)}</b>en los últimos 14 días</div><div class="cols">${days.map(([d, v], i) => {
+    const hoy = i === days.length - 1;
+    return `<div class="bar${hoy ? ' today' : ''}" data-tip="${hoy ? 'Hoy' : `${d.slice(8)}/${d.slice(5, 7)}`}: ${format(v)}"><b>${v ? format(v) : ''}</b><span style="height:${(v / max) * 100}%;animation-delay:${i * 35}ms"></span><small>${hoy ? 'hoy' : d.slice(8)}</small></div>`;
+  }).join('')}</div>`;
+}
+
+// Mini gráfico de línea para los números grandes.
+function spark(rows, key) {
+  const pts = ultimos14(rows, key).map(([, v]) => v);
+  const max = Math.max(1e-9, ...pts);
+  const xy = pts.map((v, i) => [(i / (pts.length - 1)) * 100, 38 - (v / max) * 32]);
+  const line = xy.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path class="a" d="${line} L100 40 L0 40 Z"/><path class="l" d="${line}"/></svg>`;
+}
+
+const ICO = {
+  cobro: '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6.5 15h4"/>',
+  mrr: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  clientes: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
+  clips: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 9.5l4 2.5-4 2.5z"/>',
+  usuarios: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  nuevos: '<circle cx="10" cy="8" r="4"/><path d="M2 21a8 8 0 0 1 13-6.2M19 14v6M16 17h6"/>',
+  hoy: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  costo: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+  ganancia: '<path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+  horas: '<path d="M6 2h12M6 22h12M7 2v4l5 6-5 6v4M17 2v4l-5 6 5 6v4"/>',
+};
+const ico = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICO[n]}</svg>`;
+const inicial = (name) => esc((String(name || '?').trim()[0] || '?').toUpperCase());
+
+// Reparto en una barra (usuarios por plan, clips por modo) con su leyenda.
+function reparto(el, obj, names, colors, vacio) {
+  const entries = Object.entries(obj);
+  const total = entries.reduce((a, [, v]) => a + v, 0);
+  if (!total) { el.innerHTML = `<span class="muted">${vacio}</span>`; return; }
+  const color = (k, i) => colors[k] || ['#3a6cff', '#7d9bff', '#b9c8ff', '#1f4bd1', '#5b6b8c'][i % 5];
+  el.innerHTML = `<div class="dist">${entries.map(([k, v], i) => `<span style="flex:${v};background:${color(k, i)};animation-delay:${i * 90}ms" title="${esc(names[k] || k)}: ${v}"></span>`).join('')}</div>
+    ${entries.map(([k, v], i) => `<span class="pill"><i style="background:${color(k, i)}"></i>${esc(names[k] || k)}<b>${v}</b><small>${Math.round((v / total) * 100)}%</small></span>`).join('')}`;
 }
 
 async function loadStats() {
@@ -135,30 +177,34 @@ async function loadStats() {
   $('#aiBadge').textContent = s.aiEnabled ? '● IA Pro activa' : '● IA Pro apagada: pon tu clave de Claude en Ajustes';
   $('#aiBadge').style.cursor = s.aiEnabled ? '' : 'pointer';
   $('#aiBadge').onclick = s.aiEnabled ? null : () => showTab('ajustes');
+  const int = (n) => Math.round(n);
+  // [título, valor, formato, color, icono, días para el mini gráfico, campo]. Los 4 primeros salen grandes.
   const cards = [
-    ['Usuarios', s.totalUsers, (n) => Math.round(n), ''],
-    ['Nuevos (7 días)', s.newUsers7d, (n) => Math.round(n), ''],
-    ['Clientes pagando', s.paying, (n) => Math.round(n), ''],
-    ['Cobrado este mes', s.incomeMonth, money, 'good'],
-    ['Ingreso mensual', s.mrr, money, 'good'],
-    ['Clips sacados', s.clipsTotal, (n) => Math.round(n), ''],
-    ['Clips hoy', s.clipsToday, (n) => Math.round(n), ''],
-    ['Costo IA del mes', s.aiCostMonth, money, 'warn'],
-    ['Ganancia estimada', s.profitMonth, money, s.profitMonth >= 0 ? 'good' : 'warn'],
-    ['Horas analizadas', s.aiHoursMonth, (n) => n.toFixed(1), ''],
+    ['Cobrado este mes', s.incomeMonth, money, 'good', 'cobro', s.incomeDaily, 's'],
+    ['Ingreso mensual', s.mrr, money, 'good', 'mrr'],
+    ['Clientes pagando', s.paying, int, '', 'clientes'],
+    ['Clips sacados', s.clipsTotal, int, '', 'clips', s.clipsDaily, 'n'],
+    ['Usuarios', s.totalUsers, int, '', 'usuarios'],
+    ['Nuevos (7 días)', s.newUsers7d, int, '', 'nuevos'],
+    ['Clips hoy', s.clipsToday, int, '', 'hoy'],
+    ['Costo IA del mes', s.aiCostMonth, money, 'warn', 'costo'],
+    ['Ganancia estimada', s.profitMonth, money, s.profitMonth >= 0 ? 'good' : 'warn', 'ganancia'],
+    ['Horas analizadas', s.aiHoursMonth, (n) => n.toFixed(1), '', 'horas'],
   ];
-  $('#stats').innerHTML = cards.map(([label], i) => `<div class="stat" style="animation-delay:${i * 60}ms"><div class="label">${label}</div><div class="value ${cards[i][3]}">0</div></div>`).join('');
+  const notas = { 1: 'Lo que suman los planes activos cada mes', 2: `De ${s.totalUsers} cuenta${s.totalUsers === 1 ? '' : 's'} en total` };
+  $('#stats').innerHTML = cards.map(([label, , , cls, icon, rows, key], i) => `<div class="stat ${i < 4 ? 'big' : ''}" style="animation-delay:${i * 60}ms">
+    <div class="label">${ico(icon)}${label}</div><div class="value ${cls}">0</div>${i < 4 && rows ? spark(rows, key) : ''}${notas[i] ? `<div class="nota">${esc(notas[i])}</div>` : ''}</div>`).join('');
   $$('#stats .value').forEach((el, i) => countUp(el, cards[i][1], cards[i][2]));
   bars($('#chartSignups'), s.signups, 'n', (v) => Math.round(v));
   bars($('#chartAi'), s.aiDaily, 'cost', (v) => v.toFixed(2));
   bars($('#chartClips'), s.clipsDaily, 'n', (v) => Math.round(v));
   bars($('#chartIncome'), s.incomeDaily, 's', (v) => v.toFixed(0));
-  const modes = { local: '💻 IA local', ia: '✨ Claude' };
-  $('#clipsMode').innerHTML = Object.entries(s.clipsByMode).map(([k, v]) => `<span class="pill">${esc(modes[k] || k)}<b>${v}</b></span>`).join('') || '<span class="muted">Todavía no se sacaron clips</span>';
-  $('#topClippers').innerHTML = s.topClippers.map((u) => `<div class="item"><div><div class="u-name">${esc(u.name)}</div><div class="sub">${esc(u.email)}</div></div><span class="tag ok">${u.n} clips</span></div>`).join('') || '<span class="muted">Sin clips aún</span>';
+  reparto($('#clipsMode'), s.clipsByMode, { local: 'IA local', ia: 'Claude' }, { ia: '#3a6cff', local: '#9db4ff' }, 'Todavía no se sacaron clips');
+  const maxClips = Math.max(1, ...s.topClippers.map((u) => u.n));
+  $('#topClippers').innerHTML = s.topClippers.map((u, i) => `<div class="item" style="animation-delay:${i * 60}ms"><span class="pos">${i + 1}</span><div class="grow"><div class="u-name">${esc(u.name)}</div><div class="sub">${esc(u.email)}</div><div class="meter"><i style="width:${(u.n / maxClips) * 100}%"></i></div></div><span class="tag ok">${u.n} clips</span></div>`).join('') || '<span class="muted">Sin clips aún</span>';
   const names = { trial: 'Prueba', local: 'Local', pro: 'Claude', pro247: 'Pro 24/7', vencido: 'Vencidos' };
-  $('#byPlan').innerHTML = Object.entries(s.byPlan).map(([k, v]) => `<span class="pill">${esc(names[k] || k)}<b>${v}</b></span>`).join('') || '<span class="muted">Sin usuarios aún</span>';
-  $('#recent').innerHTML = s.recent.map((u) => `<div class="item"><div><div class="u-name">${esc(u.name)}</div><div class="sub">${esc(u.email)}</div></div><span class="tag ${u.planActive ? 'ok' : 'bad'}">${esc(u.planName)}</span></div>`).join('') || '<span class="muted">Sin registros</span>';
+  reparto($('#byPlan'), s.byPlan, names, { pro: '#3a6cff', local: '#9db4ff', trial: '#6b7a99', pro247: '#1f4bd1', vencido: '#39445f' }, 'Sin usuarios aún');
+  $('#recent').innerHTML = s.recent.map((u, i) => `<div class="item" style="animation-delay:${i * 60}ms"><div class="who-row"><span class="av">${inicial(u.name)}</span><div><div class="u-name">${esc(u.name)}</div><div class="sub">${esc(u.email)}</div></div></div><span class="tag ${u.planActive ? 'ok' : 'bad'}">${esc(u.planName)}</span></div>`).join('') || '<span class="muted">Sin registros</span>';
 }
 
 // ---------- Usuarios ----------
@@ -172,7 +218,7 @@ async function loadUsers() {
   usersCache = users;
   $('#usersBody').innerHTML = users.map((u, i) => `
     <tr style="animation-delay:${Math.min(i, 20) * 25}ms">
-      <td><div class="u-name">${esc(u.name)} ${u.role === 'admin' ? '<span class="tag admin">admin</span>' : ''} ${u.banned ? '<span class="tag bad">suspendido</span>' : ''}</div><div class="u-mail">${esc(u.email)}</div></td>
+      <td><div class="who-row"><span class="av">${inicial(u.name)}</span><div><div class="u-name">${esc(u.name)} ${u.role === 'admin' ? '<span class="tag admin">admin</span>' : ''} ${u.banned ? '<span class="tag bad">suspendido</span>' : ''}</div><div class="u-mail">${esc(u.email)}</div></div></div></td>
       <td><span class="tag ${u.planActive ? 'ok' : 'bad'}">${esc(u.planName)}</span></td>
       <td>${u.role === 'admin' ? '—' : fecha(u.planExpires)}</td>
       <td>${u.clips}</td>
@@ -194,6 +240,8 @@ function openUser(u) {
     <label>Plan<select id="mPlan">${plansCache.map((p) => `<option value="${p.id}" ${p.id === u.plan ? 'selected' : ''}>${esc(p.name)} — ${money(p.price_usd)}/mes</option>`).join('')}</select></label>
     <label>Vence<input id="mExpires" type="date" value="${u.planExpires ? u.planExpires.slice(0, 10) : ''}" /></label>
     <label class="check"><input type="checkbox" id="mNotify" checked /> Avisarle por correo si cambia su plan o su fecha</label>
+    ${u.role === 'admin' ? `<label class="check"><input type="checkbox" id="mClave" ${u.claveServidor ? 'checked' : ''} /> 🔑 Puede usar tu clave de Claude (la del servidor): lo que gaste se cobra en tu cuenta</label>
+    <p class="muted tiny" style="margin:-4px 0 8px 26px">${u.clavePropia ? 'Tiene su propia clave puesta en la app: usa esa.' : 'No tiene clave propia. Sin esta casilla, no usa Claude hasta que ponga la suya en la app (Ajustes).'}</p>` : ''}
     <div class="modal-actions">
       <button class="btn small" data-days="30">+1 mes</button>
       <button class="btn small" data-days="90">+90 días</button>
@@ -238,6 +286,14 @@ function openUser(u) {
   }).catch(() => { $('#mDetail').textContent = ''; });
   $('#mBan').onclick = () => patch({ banned: !u.banned }, u.banned ? 'Cuenta reactivada' : 'Cuenta suspendida');
   $('#mRole').onclick = () => patch({ role: u.role === 'admin' ? 'user' : 'admin' }, 'Rol actualizado');
+  $('#mClave')?.addEventListener('change', async (e) => {
+    try {
+      await api(`/admin/users/${u.id}`, { method: 'PATCH', body: { claveServidor: e.target.checked } });
+      u.claveServidor = e.target.checked;
+      toast(e.target.checked ? 'Ahora puede usar tu clave de Claude' : 'Ya no usa tu clave de Claude');
+      loadUsers();
+    } catch (err) { e.target.checked = !e.target.checked; toast(err.message, 'bad'); }
+  });
   $('#mSave').onclick = () => {
     const body = { plan: $('#mPlan').value, planExpires: $('#mExpires').value ? `${$('#mExpires').value}T23:59:59` : null };
     if ($('#mPass').value) body.newPassword = $('#mPass').value;
@@ -311,6 +367,7 @@ zipInput.addEventListener('change', showZip);
 function showZip() {
   const f = zipInput.files[0];
   $('#dropZipText').textContent = f ? `${f.name} · ${(f.size / 1048576).toFixed(1)} MB` : 'Descarga de la web (.zip)';
+  $('#webSame').classList.toggle('hidden', !!f);
   const m = f?.name.match(/(\d+\.\d+\.\d+)/);
   if (m && !$('#releaseForm [name=version]').value) $('#releaseForm [name=version]').value = m[1];
 }
@@ -344,15 +401,20 @@ $('#releaseForm').addEventListener('submit', async (e) => {
   const btn = form.querySelector('button[type=submit]');
   btn.disabled = true;
   const hecho = [];
+  let avisoWeb = '';
   try {
     if (exe) {
       const data = new FormData();
       data.set('version', version);
       data.set('notes', form.notes.value);
       data.set('mandatory', form.mandatory.checked ? 'true' : 'false');
+      const web = !zip && form.web.checked;
+      data.set('web', web ? 'true' : 'false');
       data.set('file', exe);
-      await subirArchivo('/api/admin/releases', data, bar);
+      const r = await subirArchivo('/api/admin/releases', data, bar);
       hecho.push('las apps la verán al abrirse');
+      if (r.descarga) hecho.push('la web ya descarga esta versión');
+      if (r.descargaError) avisoWeb = r.descargaError;
     }
     if (zip) {
       bar.firstElementChild.style.width = '0';
@@ -362,7 +424,7 @@ $('#releaseForm').addEventListener('submit', async (e) => {
       await subirArchivo('/api/admin/descarga', data, bar);
       hecho.push('la web ya descarga este .zip');
     }
-    toast(`¡Listo! ${hecho.join(' y ')}.`);
+    if (avisoWeb) toast(avisoWeb, 'bad'); else toast(`¡Listo! ${hecho.join(' y ')}.`);
     form.reset(); showFile(); showZip();
   } catch (err) {
     toast(hecho.length ? `${err.message} (lo anterior sí se subió: ${hecho.join(' y ')})` : err.message, 'bad');
@@ -498,6 +560,86 @@ for (const id of ['#settingsForm', '#socialForm']) {
 // Arranque
 if (token) start(); else $('#login').classList.remove('hidden');
 
+// ---------- Publicaciones que el servidor va a hacer ----------
+const NET_NAMES = { facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok' };
+const NET_ICONS = { facebook: '📘', instagram: '📸', youtube: '▶️', tiktok: '🎵' };
+const POST_STATUS = {
+  pendiente: ['', 'Programada'], subiendo: ['admin', 'Subiendo'], tarde: ['bad', 'Hora pasada'],
+  publicado: ['ok', 'Publicada'], error: ['bad', 'Falló'], cancelado: ['', 'Cancelada'],
+};
+const cuando = (ms) => new Date(ms).toLocaleString('es', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+function falta(ms) {
+  const min = Math.round((ms - Date.now()) / 60000);
+  if (min <= 0) return 'toca ya';
+  if (min < 60) return `en ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return `en ${h} h${min % 60 ? ` ${min % 60} min` : ''}`;
+  return `en ${Math.round(h / 24)} días`;
+}
+const durTxt = (s) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : '');
+function postClip(p) {
+  const recorte = p.recorte ? String(p.recorte).replace(/^✂️\s*/, '') : '';
+  return `<div class="post-clip"><div class="u-name">${esc(p.title || '(sin título)')}</div>
+    ${p.duration ? `<div class="u-mail">⏱️ ${durTxt(p.duration)}${recorte ? ` · ✂️ ${esc(recorte)}` : ''}</div>` : ''}
+    ${p.caption ? `<div class="u-mail post-caption">${esc(p.caption)}</div>` : ''}</div>`;
+}
+const postUser = (p) => `<div class="u-name">${esc(p.user.name)} ${p.user.role === 'admin' ? '<span class="tag admin">admin</span>' : ''}</div><div class="u-mail">${esc(p.user.email)}</div>`;
+function postState(p) {
+  const [cls, label] = POST_STATUS[p.status] || ['', p.status];
+  const extra = p.status === 'subiendo' ? ` ${Math.round((p.progress || 0) * 100)}%` : '';
+  const warn = !p.sePublica ? 'Esta cuenta no es admin: el servidor no la publica'
+    : !p.conVideo && p.status !== 'publicado' && p.status !== 'cancelado' ? 'Falta el video en el servidor: la app lo vuelve a mandar' : '';
+  return `<div class="post-state"><span class="tag ${cls}">${label}${extra}</span>${p.attempts && p.status !== 'publicado' ? ` <span class="u-mail">intento ${p.attempts}</span>` : ''}
+    ${p.error ? `<div class="u-mail post-error">${esc(p.error)}</div>` : p.note ? `<div class="u-mail">${esc(p.note)}</div>` : ''}
+    ${warn ? `<div class="u-mail post-error">${esc(warn)}</div>` : ''}</div>`;
+}
+let postsTimer = null;
+async function loadPosts() {
+  clearTimeout(postsTimer);
+  const d = await api('/admin/publicaciones');
+  $('#postsBadge').className = `badge ${d.activo ? 'on' : 'off'}`;
+  $('#postsBadge').textContent = d.activo
+    ? `● Publicando solo · ${d.proximas.length} por publicar`
+    : d.puede ? '● El publicador está apagado' : '● Este servidor no puede publicar: le falta desktop/engine (actualízalo)';
+  $('#postsNext').innerHTML = d.proximas.map((p) => `<tr>
+      <td><div class="u-name">${cuando(p.scheduledAt)}</div><div class="u-mail">${p.status === 'subiendo' ? 'ahora' : p.status === 'tarde' ? 'la hora ya pasó' : falta(p.scheduledAt)}</div></td>
+      <td>${NET_ICONS[p.platform] || ''} ${esc(NET_NAMES[p.platform] || p.platform)}</td>
+      <td>${postClip(p)}</td>
+      <td>${postUser(p)}</td>
+      <td>${postState(p)}</td>
+      <td><div class="btn-row post-actions">${['pendiente', 'tarde'].includes(p.status)
+        ? `<button class="btn small" data-post-now="${esc(p.id)}">Publicar ya</button><button class="btn small danger" data-post-cancel="${esc(p.id)}">Cancelar</button>` : ''}</div></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">No hay nada programado en el servidor. Lo que programes desde la app (con "Publicar desde el servidor" encendido) aparece aquí.</td></tr>';
+  $('#postsLast').innerHTML = d.recientes.map((p) => `<tr>
+      <td><div class="u-name">${cuando(p.publishedAt || p.updatedAt)}</div></td>
+      <td>${NET_ICONS[p.platform] || ''} ${esc(NET_NAMES[p.platform] || p.platform)}</td>
+      <td>${postClip(p)}${p.url ? `<div class="u-mail"><a href="${esc(p.url)}" target="_blank" rel="noopener">Ver publicación</a></div>` : ''}</td>
+      <td>${postUser(p)}</td>
+      <td>${postState(p)}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">Nada en los últimos 7 días</td></tr>';
+  // Se actualiza sola cada 20 segundos mientras la pestaña está abierta (y cada 3 s si algo se está subiendo).
+  if (!$('[data-tab="publicaciones"].tab').classList.contains('hidden')) {
+    postsTimer = setTimeout(() => loadPosts().catch(() => {}), d.proximas.some((p) => p.status === 'subiendo') ? 3000 : 20000);
+  }
+}
+$('#postsNext').addEventListener('click', async (e) => {
+  const now = e.target.closest('[data-post-now]')?.dataset.postNow;
+  const cancel = e.target.closest('[data-post-cancel]')?.dataset.postCancel;
+  if (!now && !cancel) return;
+  if (cancel && !confirm('¿Cancelar esta publicación? No se publicará.')) return;
+  const btn = e.target.closest('button');
+  btn.disabled = true;
+  try {
+    await api(`/admin/publicaciones/${encodeURIComponent(now || cancel)}/${now ? 'ahora' : 'cancelar'}`, { method: 'POST' });
+    toast(now ? 'Se publica en unos segundos' : 'Publicación cancelada');
+    await loadPosts();
+    // Para ver enseguida si se subió (o por qué falló), sin esperar la actualización de cada 20 segundos.
+    if (now) setTimeout(() => loadPosts().catch(() => {}), 2500);
+  } catch (err) {
+    toast(err.message, 'bad');
+    btn.disabled = false;
+  }
+});
 
 // ---------- Pagos (PayPal) ----------
 const PAY_STATUS = { pagado: ['ok', 'Pagado'], cancelado: ['', 'Cancelado'], error: ['bad', 'Error'], creado: ['', 'Sin pagar'] };

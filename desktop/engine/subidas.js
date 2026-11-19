@@ -33,7 +33,7 @@ class UploadQueue extends EventEmitter {
    * onResult(platform, ok): para estadísticas
    * relay: { put(file), remove(id) } para que Instagram descargue el video desde el servidor si hace falta
    * onLate(job): si la PC estaba apagada a la hora elegida, devuelve la nueva hora (o null para publicar ya)
-   * prepare(job): antes de subir, puede dar otro archivo { file, duration, note, cleanup } (por ejemplo, la copia recortada
+   * prepare(job, onNote): antes de subir, puede dar otro archivo { file, duration, note, cleanup } (por ejemplo, la copia recortada
    *   para Instagram) o null para subir el clip tal cual. cleanup() se llama al terminar, salga bien o mal.
    * remote: publicar desde el servidor de ClipViral (en esta PC o en un VPS). La subida se manda al servidor apenas se
    *   programa y el servidor la publica a su hora, aunque la PC esté apagada. La app solo sigue su estado (sync).
@@ -158,7 +158,7 @@ class UploadQueue extends EventEmitter {
       remote = this.remoteFor(job) && !(job.sendAfter > Date.now());
       this.update(job, { status: 'subiendo', progress: 0, attempts: job.attempts + 1, error: null, ...(remote ? { note: SENDING_NOTE } : {}) });
       // Por ejemplo, la copia recortada para Instagram.
-      prepared = this.prepare ? await this.prepare(job) : null;
+      prepared = this.prepare ? await this.prepare(job, (note) => this.update(job, { note })) : null;
       if (remote) {
         // Al servidor: el video y los textos. Desde ahí, el servidor la publica a su hora (la PC ya se puede apagar).
         let sent = 0;

@@ -468,7 +468,7 @@ async function renderRedes(el) {
             ${autoLine(p.id)}
             ${p.id === 'youtube' ? `<div class="setting"><div class="grow"><b>${L('Agregar #Shorts', 'Add #Shorts')}</b><small>${L('Ayuda a que YouTube lo trate como Short.', 'Helps YouTube treat it as a Short.')}</small></div><label class="toggle"><input type="checkbox" data-cfg="shortsTag" ${cfg.shortsTag ? 'checked' : ''}/><span></span></label></div>` : ''}
             ${p.id === 'instagram' ? `<div class="setting"><div class="grow"><b>${L('Mostrar también en el feed', 'Also show in the feed')}</b></div><label class="toggle"><input type="checkbox" data-cfg="shareToFeed" ${cfg.shareToFeed !== false ? 'checked' : ''}/><span></span></label></div>
-            <div class="setting"><div class="grow"><b>✂️ ${L('Recortar a 39 s para Instagram', 'Trim to 39 s for Instagram')}</b><small>${L('Instagram rechaza por la API los Reels de más de ~40 s en cuentas nuevas. Se sube una copia con los primeros 39 s; las demás redes reciben el clip completo.', 'Instagram rejects Reels longer than ~40 s from new accounts through the API. A copy with the first 39 s is uploaded; other networks get the full clip.')}</small></div><label class="toggle"><input type="checkbox" data-cfg="recortar" ${cfg.recortar !== false ? 'checked' : ''}/><span></span></label></div>` : ''}
+            <div class="setting"><div class="grow"><b>✂️ ${L('Recortar a 39 s para Instagram', 'Trim to 39 s for Instagram')}</b><small>${L('Instagram rechaza por la API los Reels de más de ~40 s en cuentas nuevas. Con el plan Claude, Claude mira el clip y deja lo más interesante en 39 s con cortes saltados (sin Claude, se suben los primeros 39 s). Las demás redes reciben el clip completo.', 'Instagram rejects Reels longer than ~40 s from new accounts through the API. With the Claude plan, Claude watches the clip and keeps the most interesting parts in 39 s with jump cuts (without Claude, the first 39 s are uploaded). Other networks get the full clip.')}</small></div><label class="toggle"><input type="checkbox" data-cfg="recortar" ${cfg.recortar !== false ? 'checked' : ''}/><span></span></label></div>` : ''}
             <div class="net-actions">
               <button class="btn small primary" data-create="${p.id}">➕ <span>${L('Crear publicación', 'Create post')}</span></button>
               ${link ? `<button class="btn small ghost" data-link="${esc(link[0])}">${esc(link[1])} ↗</button>` : ''}
@@ -573,8 +573,10 @@ function showJobs() {
   }, S.page === 'redes' ? 50 : 600);
 }
 
-// Duración que acepta cada red (en segundos). Facebook Reels: de 3 a 90 s.
-const NET_LIMITS = { facebook: [3, 90], instagram: [3, 900] };
+// Duración mínima que acepta cada red (en segundos). Los clips largos sí se pueden elegir: para Facebook (más de 90 s)
+// e Instagram (más de 40 s) se sube una copia más corta en la que Claude deja lo mejor.
+const NET_LIMITS = { facebook: [3, Infinity], instagram: [3, Infinity] };
+const NET_TRIM = { facebook: [90, 88], instagram: [40, 39] };
 
 /**
  * "Crear publicación": eliges el clip y sigue la ventana de subida con esa red marcada
@@ -588,12 +590,12 @@ async function openCreatePost(platform = null) {
   const where = platform ? NET[platform].short : L('tus redes', 'your networks');
   const m = modal(`
     <h2>➕ ${L('Crear publicación', 'Create post')}</h2>
-    <p class="muted tiny">${L(`Paso 1 de 2: elige el clip que quieres publicar en ${where}.`, `Step 1 of 2: choose the clip you want to publish on ${where}.`)}${limit ? ` ${L(`(${NET[platform].short} acepta clips de ${limit[0]} a ${limit[1]} segundos.)`, `(${NET[platform].short} accepts clips from ${limit[0]} to ${limit[1]} seconds.)`)}` : ''}</p>
+    <p class="muted tiny">${L(`Paso 1 de 2: elige el clip que quieres publicar en ${where}.`, `Step 1 of 2: choose the clip you want to publish on ${where}.`)}${platform && NET_TRIM[platform] ? ` ${L(`(Si el clip pasa de ${NET_TRIM[platform][0]} s, Claude deja lo mejor en ${NET_TRIM[platform][1]} s para ${NET[platform].short}.)`, `(If the clip is longer than ${NET_TRIM[platform][0]} s, Claude keeps the best ${NET_TRIM[platform][1]} s for ${NET[platform].short}.)`)}` : ''}</p>
     ${clips.length ? `<div class="clip-pick-grid">${clips.map((c) => `
       <button class="clip-pick" data-clip="${esc(c.id)}" ${fits(c) ? '' : 'disabled'} title="${esc(c.title)}">
         <span class="clip-pick-media">${c.thumb ? `<img src="${esc(fileUrl(c.thumb))}" alt="" loading="lazy">` : ''}<span class="dur">${fmtClock(c.duration)}</span></span>
         <b>${esc(c.title)}</b>
-        <small>${fits(c) ? `🔥 ${c.score ?? '–'}/10${c.createdAt ? ` · ${new Date(c.createdAt).toLocaleDateString(LOCALE(), { day: 'numeric', month: 'short' })}` : ''}` : L(`Muy largo para ${NET[platform].short}`, `Too long for ${NET[platform].short}`)}</small>
+        <small>${fits(c) ? `🔥 ${c.score ?? '–'}/10${c.createdAt ? ` · ${new Date(c.createdAt).toLocaleDateString(LOCALE(), { day: 'numeric', month: 'short' })}` : ''}` : L(`Muy corto para ${NET[platform].short}`, `Too short for ${NET[platform].short}`)}</small>
       </button>`).join('')}</div>`
     : `<div class="empty" style="padding:28px"><div class="big" style="font-size:40px">🎬</div><div class="muted">${L('Todavía no tienes clips. Saca clips de un video en Directo y vuelve aquí.', 'You have no clips yet. Make clips from a video in Live and come back here.')}</div></div>`}
     <div class="modal-actions"><button class="btn ghost" data-c>${L('Cancelar', 'Cancel')}</button></div>`, { wide: true });

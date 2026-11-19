@@ -280,3 +280,44 @@ test('al desconectar Facebook se cancela lo programado para Facebook y para el I
   cleanPostFiles();
   assert.equal(fileOnDisk(sha(buf)), false, 'nadie lo necesita: se borra');
 });
+
+test('panel de admin: ve lo que el servidor va a publicar (de todas las cuentas) y puede publicarlo ya o cancelarlo', async () => {
+  // La prueba anterior desconectó Facebook: se vuelve a conectar (Instagram se publica a través de la página).
+  db.prepare(`INSERT INTO social_accounts (user_id, platform, account_id, account_name, access_token, refresh_token, expires_at, extra)
+    VALUES (?, 'facebook', 'PAGE1', 'Mi Página', ?, ?, ?, ?)`)
+    .run(anaId, seal('token-pagina'), seal('token-pagina'), Date.now() + 365 * 86400000,
+      JSON.stringify({ igBusinessId: 'IG77', igUsername: 'ana.ig', pageId: 'PAGE1', userToken: seal('token-usuario'), userTokenExpiresAt: Date.now() + 50 * 86400000 }));
+  const buf = video('nueve');
+  await sendFile(buf);
+  await sendFile(buf, beto);
+  const later = Date.now() + 90 * MIN;
+  const a = (await call('POST', '/api/publicaciones', { platform: 'instagram', fileHash: sha(buf), scheduledAt: later, title: 'Golazo', caption: 'mira esto', duration: 39, note: 'Claude dejó lo mejor en 39 s para Instagram' })).body;
+  const b = (await call('POST', '/api/publicaciones', { platform: 'facebook', fileHash: sha(buf), scheduledAt: later + MIN, title: 'De Beto' }, beto)).body;
+  const list = (await call('GET', '/api/admin/publicaciones')).body;
+  assert.equal(list.puede, true);
+  const mia = list.proximas.find((p) => p.id === a.id);
+  assert.equal(mia.title, 'Golazo');
+  assert.equal(mia.recorte, 'Claude dejó lo mejor en 39 s para Instagram');
+  assert.equal(mia.user.email, 'ana@clipviral.test');
+  assert.equal(mia.conVideo, true);
+  assert.equal(mia.sePublica, true);
+  assert.ok(list.proximas.some((p) => p.id === b.id && p.user.email === 'beto@clipviral.test'), 'también las de otras cuentas');
+  assert.ok(list.proximas.findIndex((p) => p.id === a.id) < list.proximas.findIndex((p) => p.id === b.id), 'en orden de hora');
+  // Publicar ya y cancelar desde el panel.
+  assert.ok((await call('POST', `/api/admin/publicaciones/${a.id}/ahora`)).body.post.scheduledAt <= Date.now());
+  await publishDue();
+  assert.equal(post(a.id).status, 'publicado');
+  assert.equal((await call('POST', `/api/admin/publicaciones/${b.id}/cancelar`)).body.post.status, 'cancelado');
+  assert.equal((await call('POST', `/api/admin/publicaciones/${b.id}/cancelar`)).status, 409);
+  assert.equal((await call('POST', '/api/admin/publicaciones/no-existe/ahora')).status, 404);
+  const after = (await call('GET', '/api/admin/publicaciones')).body;
+  assert.ok(after.recientes.some((p) => p.id === a.id && p.status === 'publicado' && p.url), 'queda en los últimos 7 días');
+  assert.ok(!after.proximas.some((p) => p.id === a.id || p.id === b.id));
+  // Solo administradores.
+  const hash = await hashPassword('ClipViral-Prueba-2026');
+  db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan, plan_expires) VALUES ('cata@clipviral.test', 'Cata', ?, 'user', 'local', ?)`).run(hash, new Date(Date.now() + 86400000).toISOString());
+  const cata = (await (await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'cata@clipviral.test', password: 'ClipViral-Prueba-2026' }) })).json()).token;
+  assert.equal((await call('GET', '/api/admin/publicaciones', null, cata)).status, 403);
+  assert.equal((await call('POST', `/api/admin/publicaciones/${b.id}/ahora`, null, cata)).status, 403);
+  assert.equal((await call('GET', '/api/admin/publicaciones', null, null)).status, 401);
+});

@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld('api', {
   cookiesPick: () => invoke('cookies:pick'),
   cookiesSet: (mode) => invoke('cookies:set', mode),
   cookiesTest: (url) => invoke('cookies:test', url),
+  // YouTube pide las cookies: se abre la guía para exportarlas desde Chrome o Edge.
+  onCookiesNeeded: on('cookies:needed'),
+  cookiesGuideSeen: () => invoke('cookies:guide-seen'),
   openUrl: (url) => invoke('shell:open', url),
   copy: (text) => invoke('clipboard:write', text),
   paste: () => invoke('clipboard:read'),

@@ -11,7 +11,8 @@ import { PROVIDERS, redirectUri } from '../social.js';
 import { socialChecklist } from '../checklist.js';
 import { mailConfig, saveMailConfig, sendMail, mailEnabled } from '../correo.js';
 import { paypalConfig, savePaypalConfig, testPaypal, paymentsEnabled, MONTH_DAYS } from '../pagos.js';
-import { descargaInfo, guardarDescarga, borrarDescarga } from '../descarga.js';
+import { descargaInfo, guardarDescarga, borrarDescarga, descargaDesdeVersion } from '../descarga.js';
+import { adminPosts, adminCancel, adminNow } from '../publicaciones.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -29,6 +30,7 @@ function userRow(u) {
   const plan = planInfo(u);
   return {
     id: u.id, email: u.email, name: u.name, role: u.role, banned: !!u.banned,
+    claveServidor: !!u.clave_servidor, clavePropia: !!u.claude_key,
     plan: u.plan, planName: plan.name, planActive: plan.active, planExpires: u.plan_expires,
     aiHoursUsed: +(plan.aiSecondsUsed / 3600).toFixed(2), aiHours: plan.aiHours,
     createdAt: u.created_at, lastLogin: u.last_login,
@@ -132,6 +134,8 @@ router.patch('/users/:id', async (req, res) => {
     if (id === req.user.id && b.role !== 'admin') return res.status(400).json({ error: 'No puedes quitarte el rol de admin' });
     db.prepare('UPDATE users SET role = ? WHERE id = ?').run(b.role, id);
   }
+  // ¿Este admin puede usar tu clave de Claude (la del servidor)? Si no, usa la suya propia.
+  if (b.claveServidor !== undefined) db.prepare('UPDATE users SET clave_servidor = ? WHERE id = ?').run(b.claveServidor ? 1 : 0, id);
   if (b.resetUsage) db.prepare('UPDATE users SET ai_seconds = 0 WHERE id = ?').run(id);
   if (b.newPassword) {
     if (String(b.newPassword).length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
@@ -237,6 +241,14 @@ router.delete('/users/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Publicaciones que el servidor va a hacer (solo administradores) ----------
+const postAction = (fn) => (req, res) => {
+  try { res.json({ post: fn(String(req.params.id)) }); } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+};
+router.get('/publicaciones', (req, res) => res.json(adminPosts()));
+router.post('/publicaciones/:id/cancelar', postAction(adminCancel));
+router.post('/publicaciones/:id/ahora', postAction(adminNow));
+
 router.get('/plans', (req, res) => {
   res.json({ plans: db.prepare('SELECT * FROM plans ORDER BY sort').all() });
 });
@@ -278,7 +290,13 @@ router.post('/releases', upload.single('file'), async (req, res) => {
   db.prepare(`INSERT INTO releases (version, notes, filename, original_name, size, sha256, mandatory) VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .run(version, String(req.body?.notes || '').slice(0, 4000), finalName, finalName, file.size, hash.digest('hex'),
       req.body?.mandatory === 'true' || req.body?.mandatory === '1' ? 1 : 0);
-  res.status(201).json({ ok: true });
+  // "Usar también para la web": el VPS arma el .zip de la descarga con este mismo instalador.
+  if (req.body?.web !== 'true' && req.body?.web !== '1') return res.status(201).json({ ok: true });
+  try {
+    res.status(201).json({ ok: true, descarga: await descargaDesdeVersion(version) });
+  } catch (err) {
+    res.status(201).json({ ok: true, descargaError: `La actualización se publicó, pero no pude armar el .zip de la web: ${err.message}` });
+  }
 });
 
 // El .zip para el botón "Descargar ClipViral" de la web.

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, getSetting, publicUser } from '../db.js';
+import { db, getSetting, publicUser, supportContact } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { keyForUser, userKeyStatus, saveUserKey, removeUserKey } from '../clave.js';
 
@@ -21,7 +21,7 @@ router.get('/me', requireAuth, (req, res) => {
     plans: publicPlans(),
     info: {
       paymentLink: getSetting('payment_link'),
-      supportContact: getSetting('support_contact'),
+      supportContact: supportContact(),
       announcement: getSetting('announcement'),
       // La app lo usa para avisar que falta poner la clave de Claude (la del servidor para el admin, la propia para un cliente).
       aiEnabled: !!keyForUser(req.user),

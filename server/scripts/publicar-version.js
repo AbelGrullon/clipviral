@@ -6,13 +6,50 @@
 // Tu contraseña de administrador se escribe aquí (no se ve ni se guarda); solo se usa para entrar al VPS y subir el archivo.
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { setTimeout as esperar } from 'node:timers/promises';
 import { ROOT, preguntar, Cancelado } from './asistente.js';
 
 const DESKTOP = path.join(ROOT, 'desktop');
 const PKG = path.join(DESKTOP, 'package.json');
 const DIRECCION = path.join(ROOT, 'servidor-central.txt');
 const SALIDA = path.join(DESKTOP, 'dist-instalador');
+
+/** Windows tenía un archivo ocupado (casi siempre el antivirus revisando ClipViral.exe recién copiado, o la app abierta). */
+export const OCUPADO_RE = /EBUSY|EPERM|resource busy or locked|being used by another process/i;
+
+/** Corre npx en desktop\ mostrando lo que dice y guardándolo (para saber si falló por un archivo ocupado). */
+function correr(args) {
+  return new Promise((resolve) => {
+    const p = spawn('npx', args, { cwd: DESKTOP, shell: true, windowsHide: true });
+    let texto = '';
+    const pasa = (dest) => (d) => { texto += d; dest.write(d); };
+    p.stdout.on('data', pasa(process.stdout));
+    p.stderr.on('data', pasa(process.stderr));
+    p.on('error', (err) => { texto += String(err?.message || err); });
+    p.on('close', (code) => resolve({ code: code ?? 1, salida: texto }));
+  });
+}
+
+/**
+ * Corre electron-builder. Si Windows tiene ClipViral.exe ocupado un momento (antivirus), espera y lo intenta otra vez.
+ * `salida`: carpeta donde deja el instalador (por defecto desktop\dist-instalador).
+ */
+export async function armarInstalador(base, { salida = SALIDA, intentos = 3, espera = 8000 } = {}) {
+  const args = ['electron-builder', '--win', 'nsis', '--config', 'instalador.json', `-c.extraMetadata.servidorCentral=${base}`];
+  if (salida !== SALIDA) args.push(`"-c.directories.output=${salida}"`);
+  let r = { code: 1, salida: '' };
+  for (let i = 1; i <= intentos; i++) {
+    // Lo que quedó a medio armar de un intento anterior se borra (con reintentos por si sigue ocupado).
+    try { fs.rmSync(path.join(salida, 'win-unpacked'), { recursive: true, force: true, maxRetries: 5, retryDelay: 1000 }); } catch {}
+    r = await correr(args);
+    if (r.code === 0 || !OCUPADO_RE.test(r.salida) || i === intentos) return r;
+    say();
+    info(`Windows tenía ClipViral.exe ocupado un momento (casi siempre es el antivirus revisándolo). Lo intento otra vez (${i + 1} de ${intentos})…`);
+    await esperar(espera);
+  }
+  return r;
+}
 
 const color = process.stdout.isTTY && !process.env.NO_COLOR;
 const pinta = (code) => (s) => (color ? `\x1b[${code}m${s}\x1b[0m` : String(s));
@@ -50,15 +87,6 @@ async function revisarServidor(base) {
   } catch { return null; }
 }
 
-/** El .zip para la web: el instalador adentro (tar.exe viene con Windows 10 y 11). */
-export function zipDelInstalador(exe) {
-  const zip = exe.replace(/\.exe$/i, '.zip');
-  fs.rmSync(zip, { force: true });
-  const r = spawnSync('tar.exe', ['-a', '-c', '-f', zip, '-C', path.dirname(exe), path.basename(exe)], { encoding: 'utf8', windowsHide: true });
-  if (r.status !== 0 || !fs.existsSync(zip)) throw new Error(`No pude crear el .zip para la web: ${(r.stderr || r.error?.message || '').trim()}`);
-  return zip;
-}
-
 async function subirArchivo(base, headers, url, campos, archivo, campo) {
   const form = new FormData();
   for (const [k, v] of Object.entries(campos)) form.set(k, v);
@@ -85,12 +113,12 @@ async function subir(base, exe, version) {
   if (sesion.user?.role !== 'admin') throw new Error('Esa cuenta no es de administrador en el VPS.');
   const headers = { Authorization: `Bearer ${sesion.token}` };
   try {
-    await subirArchivo(base, headers, '/api/admin/releases',
-      { version, notes: notas || `Versión ${version}`, mandatory: obligatoria ? 'true' : 'false' }, exe, 'file');
+    // Se sube UNA vez: el VPS arma solo el .zip de la web con este mismo instalador.
+    const r = await subirArchivo(base, headers, '/api/admin/releases',
+      { version, notes: notas || `Versión ${version}`, mandatory: obligatoria ? 'true' : 'false', web: 'true' }, exe, 'file');
     ok(`Actualización ${version} publicada. Las apps la verán en menos de 30 minutos (o al abrirse).`);
-    const zip = zipDelInstalador(exe);
-    await subirArchivo(base, headers, '/api/admin/descarga', { version }, zip, 'zip');
-    ok(`La web ya descarga la versión ${version}: ${pinta('96')(`${base}/descargar`)}`);
+    if (r.descarga) ok(`La web ya descarga la versión ${version}: ${pinta('96')(`${base}/descargar`)}`);
+    else mal(r.descargaError || 'Tu VPS no armó el .zip de la web (¿tiene el servidor viejo?). Actualiza el servidor del VPS o sube el .zip en el panel.');
   } finally {
     await fetch(`${base}/api/auth/logout`, { method: 'POST', headers, signal: AbortSignal.timeout(10000) }).catch(() => {});
   }
@@ -128,20 +156,22 @@ async function main() {
   ok(`Versión ${v}.`);
 
   titulo('3. Armar el instalador (tarda unos minutos)');
-  const r = spawnSync('npx', ['electron-builder', '--win', 'nsis', '--config', 'instalador.json', `-c.extraMetadata.servidorCentral=${base}`],
-    { cwd: DESKTOP, stdio: 'inherit', shell: true });
   const exe = path.join(SALIDA, `ClipViral-Setup-${v}.exe`);
-  if (r.status !== 0 || !fs.existsSync(exe)) {
+  const r = await armarInstalador(base);
+  if (r.code !== 0 || !fs.existsSync(exe)) {
     fs.writeFileSync(PKG, pkgText); // vuelve al número anterior
+    if (OCUPADO_RE.test(r.salida)) {
+      throw new Error('Windows no soltó el programa (ClipViral.exe) mientras se armaba. Si abriste ClipViral desde la carpeta '
+        + 'dist-instalador\\win-unpacked, ciérralo. Espera un minuto y vuelve a abrir "Publicar versión de ClipViral.bat".');
+    }
     throw new Error('No se pudo armar el instalador. Mira los mensajes de arriba.');
   }
-  ok(`Instalador listo: ${pinta('96')(exe)}`);
-  ok(`Y el .zip para la web: ${pinta('96')(zipDelInstalador(exe))}`);
+  ok(`Instalador listo: ${pinta('96')(exe)} (${(fs.statSync(exe).size / 1048576).toFixed(0)} MB)`);
   info('Quien lo descarga crea su cuenta en tu VPS al abrir la app.');
 
-  if (!h) { info('Cuando tu VPS esté encendido, sube los dos archivos en el panel de administración → Actualizaciones.'); return; }
+  if (!h) { info('Cuando tu VPS esté encendido, súbelo en el panel de administración → Actualizaciones.'); return; }
   const si = (await preguntar('    ¿Subirla ya a tu VPS (actualización para las apps + descarga de la web)? (S/n): ')).trim().toLowerCase();
-  if (si && !si.startsWith('s')) { info('No se subió. Puedes subir los dos archivos después en el panel de administración → Actualizaciones.'); return; }
+  if (si && !si.startsWith('s')) { info('No se subió. Puedes subirlo después en el panel de administración → Actualizaciones.'); return; }
   await subir(base, exe, v);
 }
 

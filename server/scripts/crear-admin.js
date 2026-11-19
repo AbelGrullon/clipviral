@@ -11,10 +11,10 @@ export async function crearAdmin({ email, password, name = 'Administrador' }) {
   const hash = await hashPassword(String(password));
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(correo);
   if (existing) {
-    db.prepare(`UPDATE users SET role = 'admin', plan = 'pro247', plan_expires = NULL, pass_hash = ?, banned = 0 WHERE id = ?`).run(hash, existing.id);
+    db.prepare(`UPDATE users SET role = 'admin', plan = 'pro247', plan_expires = NULL, pass_hash = ?, banned = 0, clave_servidor = 1 WHERE id = ?`).run(hash, existing.id);
     return { id: Number(existing.id), created: false };
   }
-  const result = db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan, plan_expires) VALUES (?, ?, ?, 'admin', 'pro247', NULL)`)
+  const result = db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan, plan_expires, clave_servidor) VALUES (?, ?, ?, 'admin', 'pro247', NULL, 1)`)
     .run(correo, String(name).trim() || 'Administrador', hash);
   return { id: Number(result.lastInsertRowid), created: true };
 }

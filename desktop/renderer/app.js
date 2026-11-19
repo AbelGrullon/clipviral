@@ -211,7 +211,7 @@ function showActivar(lic) {
   $('#actMachine').textContent = lic?.machine || '—';
   $('#actError').textContent = '';
 }
-$('#actBuy').addEventListener('click', () => comprarWhatsapp());
+$('#actBuy').addEventListener('click', () => comprarWeb());
 $('#actCopy').addEventListener('click', async () => {
   await api.copy($('#actMachine').textContent);
   toast('Código copiado. Mándaselo a quien te vendió ClipViral.', 'ok', '📋');
@@ -555,6 +555,20 @@ function saveSetting(patch) {
   }, 200);
 }
 
+// Precisión de Claude (modo IA Pro): qué hace cada nivel y cuánto cuesta más o menos.
+const PRECISION_HINT = {
+  normal: 'Rápida y barata: Haiku revisa el directo y Sonnet elige los clips. Más o menos 6 centavos de dólar por hora de directo.',
+  alta: 'Claude Opus elige y corta los clips: entiende mejor el humor y el contexto, y corta en mejor momento. Más o menos 20 centavos por hora de directo, y tarda un poco más.',
+  maxima: 'Sonnet revisa todo el directo con más cuidado (se le escapan menos momentos) y Opus elige y corta. Más o menos 40 centavos por hora de directo.',
+};
+
+/** Etiqueta de los clips que pidió el streamer o el chat ("saca ese clip"). */
+function pedidoBadge(c) {
+  if (!c?.pedido) return '';
+  const quien = c.pedido.quien === 'chat' ? 'el chat' : 'el streamer';
+  return `<span class="badge pedido" title="${esc(`Lo pidió ${quien}: “${c.pedido.frase || 'saca ese clip'}”`)}">🎯 Pedido por ${quien}</span>`;
+}
+
 function renderDirecto(el) {
   if (isRunning()) return renderLive(el);
   const s = S.settings;
@@ -590,6 +604,9 @@ function renderDirecto(el) {
           <label class="toggle" title="Subtítulos"><input type="checkbox" id="subsToggle" ${s.subtitles ? 'checked' : ''}/><span></span></label>
           <span class="muted tiny">Colores, letra y posición en "Estilo del clip" ↓</span></div></div>
         ${s.mode === 'local' ? `<div class="opt-row"><span>Sensibilidad</span><div class="chips">${chips('sensitivity', [['baja', 'Solo lo mejor'], ['media', 'Normal'], ['alta', 'Más clips']])}</div></div>` : ''}
+        ${s.mode === 'ia' ? `<div class="opt-row"><span>Precisión de Claude</span><div class="chips">${chips('precision', [['normal', 'Normal'], ['alta', 'Alta'], ['maxima', 'Máxima']])}</div></div>
+          <p class="muted tiny" id="precisionHint">${esc(PRECISION_HINT[s.precision] || PRECISION_HINT.normal)} Lo cobra tu cuenta de Claude.</p>` : ''}
+        <p class="muted tiny">🎯 Si el streamer dice "saca ese clip" (o el chat escribe !clip), la app saca un clip de lo que acaba de pasar.</p>
         <div class="opt-row"><span>Máx. clips por hora</span><div class="range-wrap"><input type="range" min="1" max="20" id="maxPerHour" value="${s.maxPerHour}"/><b id="maxPerHourVal">${s.maxPerHour}</b></div></div>
       </div>
       <div class="card" id="styleCard"></div>
@@ -616,6 +633,7 @@ function renderDirecto(el) {
     saveSetting({ [c.dataset.key]: val });
     $$(`.chip[data-key=${c.dataset.key}]`, el).forEach((x) => x.classList.toggle('active', x === c));
     if (c.dataset.key === 'style') $('#camHint')?.classList.toggle('hidden', val !== 'camara');
+    if (c.dataset.key === 'precision' && $('#precisionHint')) $('#precisionHint').textContent = `${PRECISION_HINT[val] || PRECISION_HINT.normal} Lo cobra tu cuenta de Claude.`;
   }));
   $('#subsToggle').onchange = (e) => { saveSetting({ subtitles: e.target.checked }); renderStylePreview(); };
   renderStyleCard($('#styleCard'));
@@ -634,7 +652,7 @@ function renderDirecto(el) {
         const s2 = S.settings;
         S.engine = await api.startEngine({
           url, mode: s2.mode, clipSeconds: s2.clipSeconds, style: s2.style, subtitles: s2.subtitles,
-          sensitivity: s2.sensitivity, maxPerHour: s2.maxPerHour,
+          sensitivity: s2.sensitivity, maxPerHour: s2.maxPerHour, precision: s2.precision || 'normal',
         });
         S.settings.lastUrl = url;
         updateNavBadges();
@@ -807,7 +825,7 @@ function renderMiniClips() {
   const list = S.clips.filter((c) => c.stream?.id === streamId).slice(0, 20);
   box.innerHTML = list.length ? list.map((c) => `<div class="mini-clip" data-id="${esc(c.id)}">
       <img src="${esc(fileUrl(c.thumb))}" alt=""><div style="min-width:0"><b>${esc(c.title)}</b>
-      <span class="badge" style="margin-top:6px">🔥 ${c.score}/10</span> <span class="muted tiny">${fmtClock(c.duration)}</span></div></div>`).join('')
+      <span class="badge" style="margin-top:6px">🔥 ${c.score}/10</span> ${pedidoBadge(c)} <span class="muted tiny">${fmtClock(c.duration)}</span></div></div>`).join('')
     : `<div class="empty" style="padding:30px 10px"><div class="big" style="font-size:38px">🎬</div><div class="muted">Los clips aparecerán aquí apenas estén listos.</div></div>`;
   $$('.mini-clip', box).forEach((m) => { m.onclick = () => openPlayer(S.clips.find((c) => c.id === m.dataset.id)); });
 }
@@ -931,7 +949,7 @@ function renderClips(el) {
           <div class="play"><span>▶</span></div>
           <span class="badge score">🔥 ${c.score}/10</span><span class="dur">${fmtClock(c.duration)}</span>
         </div>
-        <div class="clip-body"><div class="clip-title">${esc(c.title)}</div>
+        <div class="clip-body">${pedidoBadge(c)}<div class="clip-title">${esc(c.title)}</div>
           <div class="clip-tags">${esc(c.hashtags.join(' '))}</div>
           <div class="clip-src">${esc(c.stream?.channel || '')} · ${new Date(c.createdAt).toLocaleDateString('es')}</div></div>
         <div class="clip-actions">
@@ -986,7 +1004,7 @@ function openPlayer(clip) {
     <div class="player">
       <video src="${esc(fileUrl(clip.file))}" controls autoplay></video>
       <div style="display:flex;flex-direction:column;gap:12px;min-width:260px;max-width:360px">
-        <div><span class="badge">🔥 ${clip.score}/10</span> <span class="badge">${fmtClock(clip.duration)}</span> <span class="badge ${clip.mode === 'ia' ? 'grad' : ''}">${clip.mode === 'ia' ? '✨ IA Pro' : '💻 Local'}</span></div>
+        <div><span class="badge">🔥 ${clip.score}/10</span> <span class="badge">${fmtClock(clip.duration)}</span> <span class="badge ${clip.mode === 'ia' ? 'grad' : ''}">${clip.mode === 'ia' ? '✨ IA Pro' : '💻 Local'}</span> ${pedidoBadge(clip)}</div>
         <h2 style="margin:0">${esc(clip.title)}</h2>
         ${clip.reason ? `<div class="muted tiny">Por qué: ${esc(clip.reason)}</div>` : ''}
         <div class="copy-box">${esc(clipText(clip))}</div>
@@ -1019,7 +1037,7 @@ function renderPlan(el) {
             ${p.active ? '<span class="badge ok">Activo</span>' : '<span class="badge bad">Vencido</span>'}</div>
           <p class="muted" style="margin:6px 0">${p.expires ? (left > 0 ? `Vence en ${left} día${left === 1 ? '' : 's'} (${new Date(p.expires).toLocaleDateString('es')})` : `Venció el ${new Date(p.expires).toLocaleDateString('es')}`) : 'Sin fecha de vencimiento'}</p>
           ${p.usesAi ? `<p style="margin:0">IA Pro: <b>${(p.aiSecondsUsed / 3600).toFixed(1)} h</b> usadas de <b>${p.aiHours >= 100000 ? '∞' : `${p.aiHours} h`}</b> este mes</p>` : '<p style="margin:0">Modo Local ilimitado. Con el plan Claude, Claude elige los clips usando tu propia clave.</p>'}
-          ${S.info.supportContact ? `<p class="muted tiny" style="margin-top:8px">Soporte: ${esc(S.info.supportContact)}</p>` : ''}
+          <p class="muted tiny" style="margin-top:8px">Soporte: ${soporteTexto()}</p>
         </div>
       </div>
       <div class="plans stagger">
@@ -1064,7 +1082,7 @@ async function renderLicencia(el) {
         <div style="display:flex;gap:10px;align-items:center"><h2 style="margin:0">Plan ${esc(lic.planName)} · ${lic.daysLeft} día${lic.daysLeft === 1 ? '' : 's'}</h2>
           ${lic.daysLeft <= 5 ? '<span class="badge warn">Pide tu próxima clave</span>' : '<span class="badge ok">Activa</span>'}</div>
         <p class="muted" style="margin:6px 0 0">Vence el ${esc(fin)}.</p>
-        <button class="btn primary" id="licBuy" style="margin-top:14px"><span>💬 Comprar o renovar por WhatsApp</span></button>
+        <button class="btn primary" id="licBuy" style="margin-top:14px"><span>🛒 Comprar o renovar en la web</span></button>
         <p style="margin:10px 0 0">${lic.plan === 'claude' ? 'Claude elige los mejores momentos con tu propia clave de Claude (ponla en Ajustes), además de la IA local.' : 'La IA local de tu PC saca los clips. Para que Claude elija los clips, pide una clave del plan Claude.'}</p>
       </div>
       <div class="card">
@@ -1076,7 +1094,7 @@ async function renderLicencia(el) {
         <p class="error" id="licErr"></p>
       </div>
     </div>`;
-  $('#licBuy').onclick = comprarWhatsapp;
+  $('#licBuy').onclick = comprarWeb;
   $('#licCopy').onclick = async () => { await api.copy(lic.machine); toast('Código copiado', 'ok', '📋'); };
   $('#licPaste').onclick = async () => { const t = await api.paste().catch(() => ''); if (t) $('#licKey').value = String(t).trim(); };
   $('#licGo').onclick = (e) => withLoading(e.currentTarget, async () => {
@@ -1158,23 +1176,35 @@ async function renderMyPayments() {
   }).join('');
 }
 
-// Comprar: por ahora se habla directo por WhatsApp (el pago con PayPal está pausado).
-const COMPRAR_WHATSAPP = 'https://wa.me/18498153785?text=Hola%2C%20Me%20interesa%20comprar%20una%20suscripci%C3%B3n%20de%20la%20App%20Clip%20Viral';
-const PAYPAL_ACTIVO = true; // comprar = PayPal (tarjeta); la compra por WhatsApp quedó apagada
-const SOPORTE_WHATSAPP = 'https://wa.me/18498153785?text=Hola%2C%20necesito%20ayuda%20con%20la%20App%20Clip%20Viral';
-function soporteWhatsapp() {
-  api.openUrl(SOPORTE_WHATSAPP);
-  toast('Se abrió WhatsApp para pedir ayuda', 'ok', '💬');
+// Comprar: solo por la web (cuenta + tarjeta). Ya no se vende por WhatsApp.
+const WEB_CLIPVIRAL = 'https://cviral.duckdns.org';
+const PAYPAL_ACTIVO = true; // en "Mi plan" se paga con tarjeta (PayPal) dentro de la app; si no, se abre la web
+// Soporte: todo va al servidor de Discord de ClipViral (ahí el bot abre un ticket).
+const SOPORTE_DISCORD = 'https://discord.gg/2k4Q3bBMh';
+function soporteDiscord() {
+  api.openUrl(SOPORTE_DISCORD);
+  toast('Se abrió Discord para pedir ayuda', 'ok', '💬');
 }
-document.addEventListener('click', (e) => { if (e.target.closest('#supportBtn, [data-soporte]')) soporteWhatsapp(); });
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('[data-soporte-link]');
+  if (link) { e.preventDefault(); return api.openUrl(link.dataset.soporteLink); }
+  if (e.target.closest('#supportBtn, [data-soporte]')) soporteDiscord();
+});
+/** "Soporte: …" del servidor. Si es un enlace, se puede tocar; si no hay nada, va el de Discord. */
+function soporteTexto() {
+  const c = String(S.info?.supportContact || '').trim() || SOPORTE_DISCORD;
+  return /^https?:\/\//i.test(c) ? `<a href="#" data-soporte-link="${esc(c)}">${esc(c)}</a>` : esc(c);
+}
 
-function comprarWhatsapp() {
-  api.openUrl(COMPRAR_WHATSAPP);
-  toast('Se abrió WhatsApp para hablar de tu suscripción', 'ok', '💬');
+/** Abre la página de compra de la web (la del VPS al que está conectada la app; si no, cviral.duckdns.org). */
+function comprarWeb() {
+  const base = S.appInfo?.central && /^https?:\/\//.test(S.appInfo.serverUrl || '') ? S.appInfo.serverUrl : WEB_CLIPVIRAL;
+  api.openUrl(`${base.replace(/\/+$/, '')}/comprar`);
+  toast('Se abrió la web para comprar tu plan', 'ok', '🛒');
 }
 
 async function buyPlan(pl) {
-  if (!PAYPAL_ACTIVO) return comprarWhatsapp();
+  if (!PAYPAL_ACTIVO) return comprarWeb();
   const link = S.info.paymentLink;
   const status = await api.payStatus().catch(() => ({ enabled: false }));
   const p = S.user.plan;
@@ -1188,7 +1218,7 @@ async function buyPlan(pl) {
       <div id="payState" class="muted tiny"></div>`
     : `<p>${link ? 'Te llevamos a la página de pago. Cuando se confirme, tu plan se activa en tu cuenta.' : 'El pago con tarjeta no está disponible en este momento. Intenta de nuevo más tarde.'}</p>
       <p class="muted tiny">Usa el mismo correo de tu cuenta: <b>${esc(S.user.email)}</b></p>`}
-    ${S.info.supportContact ? `<p class="muted tiny">Soporte: ${esc(S.info.supportContact)}</p>` : ''}
+    <p class="muted tiny">Soporte: ${soporteTexto()}</p>
     <div class="modal-actions"><button class="btn ghost" data-c>Cerrar</button>
       ${status.enabled ? '<button class="btn ghost hidden" data-check><span>Ya pagué</span></button><button class="btn primary" data-card><span>💳 Pagar con tarjeta</span></button>'
         : (link ? '<button class="btn primary" data-pay><span>Ir a pagar</span></button>' : '')}</div>`);
@@ -1427,6 +1457,7 @@ function renderAjustes(el) {
         <div class="net-actions" style="margin-top:8px">
           <button class="btn small primary" id="ckPick">Elegir archivo cookies.txt</button>
           <button class="btn small" id="ckTest">Probar</button>
+          <button class="btn small" id="ckGuide">📖 Ver cómo, paso a paso</button>
         </div>
         <p class="tiny" id="ckMsg" style="margin-top:8px"></p>
       </div>
@@ -1516,6 +1547,97 @@ function renderAjustes(el) {
   renderClaudeCard($('#claudeCard'));
 }
 
+// ---------- Guía: cómo poner (o renovar) las cookies de YouTube desde Chrome o Edge ----------
+// Se abre sola cuando YouTube pide "confirmar que no eres un robot" (o las cookies que había ya no sirven),
+// y también desde Ajustes → Cookies de YouTube.
+const COOKIE_EXT_URL = 'https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc';
+const COOKIE_STEPS = {
+  chrome: [
+    'Abre la extensión <b>Get cookies.txt LOCALLY</b> en la tienda de Chrome y toca <b>Añadir a Chrome</b> → <b>Añadir extensión</b>. (Si ya la tienes, salta este paso.)<div class="ckg-btns"><button class="btn small" data-ck-open="ext">🧩 Abrir la tienda de Chrome</button></div>',
+    'Entra a <b>youtube.com</b> y revisa que tu sesión esté iniciada (arriba a la derecha se ve tu foto). Mejor con una cuenta de YouTube secundaria, no la principal.<div class="ckg-btns"><button class="btn small" data-ck-open="yt">▶️ Abrir YouTube</button></div>',
+    'Estando en YouTube, toca la <b>pieza de rompecabezas 🧩</b> (arriba a la derecha) → <b>Get cookies.txt LOCALLY</b> → <b>Export</b>. Se descarga un archivo parecido a <i>www.youtube.com_cookies.txt</i>.',
+    'Vuelve aquí y toca <b>Subir el archivo cookies.txt</b>. Se abre tu carpeta de Descargas: elige ese archivo. La app prueba sola si YouTube ya te deja pasar.',
+  ],
+  edge: [
+    'Copia este enlace y pégalo en <b>Edge</b>: es la extensión <b>Get cookies.txt LOCALLY</b> (Edge puede usar las de la tienda de Chrome).<div class="ckg-btns"><button class="btn small" data-ck-copy>📋 Copiar el enlace</button></div>',
+    'Arriba sale un aviso <b>Permitir extensiones de otras tiendas</b>: toca <b>Permitir</b> y, en la ventanita, otra vez <b>Permitir</b>.',
+    'Toca <b>Obtener</b> (o <b>Añadir a Chrome</b>) → <b>Agregar extensión</b>. (Si ya la tienes, salta hasta aquí.)',
+    'En Edge entra a <b>youtube.com</b> y revisa que tu sesión esté iniciada (arriba a la derecha se ve tu foto). Mejor con una cuenta de YouTube secundaria, no la principal.',
+    'Estando en YouTube, toca el icono de <b>Extensiones 🧩</b> (arriba a la derecha) → <b>Get cookies.txt LOCALLY</b> → <b>Export</b>. Se descarga un archivo parecido a <i>www.youtube.com_cookies.txt</i>.',
+    'Vuelve aquí y toca <b>Subir el archivo cookies.txt</b>. Se abre tu carpeta de Descargas: elige ese archivo. La app prueba sola si YouTube ya te deja pasar.',
+  ],
+};
+let cookiesGuide = null;
+function openCookiesGuide({ vencidas = false, desdeAjustes = false } = {}) {
+  if (cookiesGuide) return;
+  api.cookiesGuideSeen?.().catch(() => {});
+  let browser = 'chrome';
+  try { if (localStorage.getItem('ckBrowser') === 'edge') browser = 'edge'; } catch {}
+  const intro = desdeAjustes
+    ? 'Así conectas tu sesión de YouTube con un archivo «cookies.txt». Toma un minuto y se guarda solo en esta PC.'
+    : vencidas
+      ? 'YouTube volvió a pedir que confirmes que no eres un robot: las cookies que subiste ya no sirven (YouTube las cambia cada cierto tiempo). Exporta unas nuevas: toma un minuto.'
+      : 'YouTube pidió confirmar que no eres un robot. Para seguir sacando clips, la app necesita tu sesión de YouTube (un archivo «cookies.txt»). Toma un minuto y se guarda solo en esta PC.';
+  const m = modal(`
+    <h2 data-ckguide>🍪 ${vencidas && !desdeAjustes ? 'Renueva tus cookies de YouTube' : 'Conecta tu sesión de YouTube'}</h2>
+    <p class="muted">${intro}</p>
+    <div class="ckg-tabs" role="tablist">
+      <button class="btn small" data-ck-tab="chrome" role="tab">Google Chrome</button>
+      <button class="btn small" data-ck-tab="edge" role="tab">Microsoft Edge</button>
+    </div>
+    <ol class="ckg-steps" id="ckgSteps"></ol>
+    <details class="ckg-more">
+      <summary>¿Te lo vuelve a pedir seguido? Así duran más</summary>
+      <p class="tiny muted">Si sigues usando YouTube en esa ventana, YouTube cambia las cookies y las que subiste dejan de servir. Para que duren semanas:</p>
+      <ol class="tiny muted">
+        <li>Ve a Extensiones (🧩 → <b>Administrar extensiones</b>), abre <b>Detalles</b> de Get cookies.txt LOCALLY y enciende <b>Permitir en incógnito</b> (en Edge: <b>Permitir en InPrivate</b>).</li>
+        <li>Abre una ventana de incógnito o InPrivate (<b>Ctrl + Mayús + N</b>), entra a youtube.com e inicia sesión.</li>
+        <li>Exporta igual que arriba y <b>cierra esa ventana</b> (sin cerrar sesión). Sube ese archivo aquí.</li>
+      </ol>
+    </details>
+    <p class="tiny" id="ckgMsg" aria-live="polite"></p>
+    <div class="modal-actions">
+      <button class="btn ghost" data-c>Ahora no</button>
+      <button class="btn primary" id="ckgPick"><span>📂 Subir el archivo cookies.txt</span></button>
+    </div>`, { onClose: () => { cookiesGuide = null; } });
+  cookiesGuide = m;
+  const msg = (text, kind) => { const p = $('#ckgMsg', m.el); p.textContent = text; p.style.color = kind === 'bad' ? '#fca5a5' : kind === 'warn' ? '#fcd34d' : kind === 'ok' ? '#86efac' : ''; };
+  const show = (b) => {
+    browser = b;
+    try { localStorage.setItem('ckBrowser', b); } catch {}
+    m.el.querySelectorAll('[data-ck-tab]').forEach((t) => { const on = t.dataset.ckTab === b; t.classList.toggle('primary', on); t.setAttribute('aria-selected', on); });
+    $('#ckgSteps', m.el).innerHTML = COOKIE_STEPS[b].map((s) => `<li>${s}</li>`).join('');
+  };
+  show(browser);
+  m.el.querySelectorAll('[data-ck-tab]').forEach((t) => { t.onclick = () => show(t.dataset.ckTab); });
+  $('#ckgSteps', m.el).onclick = async (e) => {
+    const open = e.target.closest('[data-ck-open]');
+    if (open) api.openUrl(open.dataset.ckOpen === 'yt' ? 'https://www.youtube.com' : COOKIE_EXT_URL);
+    if (e.target.closest('[data-ck-copy]')) {
+      await api.copy(COOKIE_EXT_URL).catch(() => {});
+      msg('✔ Enlace copiado. Pégalo en la barra de direcciones de Edge (Ctrl + V) y pulsa Enter.', 'ok');
+    }
+  };
+  $('[data-c]', m.el).onclick = () => m.close();
+  $('#ckgPick', m.el).onclick = (e) => withLoading(e.currentTarget, async () => {
+    try {
+      const info = await api.cookiesPick();
+      if (!info) return;
+      msg('Archivo guardado. Probando con YouTube… (puede tardar un poco)');
+      const r = await api.cookiesTest(S.settings?.lastUrl).catch((err) => ({ ok: false, error: err.message }));
+      if ($('#ytCookCard')) bindCookiesCard();
+      if (r.ok) {
+        msg(`✔ Listo: YouTube dejó leer «${r.title}». Ya puedes seguir sacando clips.`, 'ok');
+        $('[data-c]', m.el).textContent = 'Cerrar';
+        $('#ckgPick', m.el).style.display = 'none'; // (.btn usa display: inline-flex, que le gana a hidden)
+      } else {
+        msg(`${r.error} Revisa que exportaste estando en youtube.com con tu sesión iniciada, y prueba otra vez.`, 'bad');
+      }
+    } catch (err) { msg(err.message, 'bad'); }
+  });
+}
+api.onCookiesNeeded?.((r) => openCookiesGuide(r || {}));
+
 // ---------- Cookies de YouTube (cuando YouTube pide "no soy un robot") ----------
 function bindCookiesCard() {
   const card = $('#ytCookCard');
@@ -1545,6 +1667,7 @@ function bindCookiesCard() {
       msg('✔ Archivo guardado. Toca «Probar» para ver si YouTube ya te deja pasar.', 'ok');
     } catch (err) { msg(err.message, 'bad'); }
   });
+  $('#ckGuide', card).onclick = () => openCookiesGuide({ desdeAjustes: true });
   $('#ckTest', card).onclick = (e) => withLoading(e.currentTarget, async () => {
     msg('Probando con YouTube… (puede tardar un poco)');
     const r = await api.cookiesTest(S.settings?.lastUrl).catch((err) => ({ ok: false, error: err.message }));
@@ -1602,9 +1725,9 @@ function bindServerCard() {
 }
 
 // ---------- Clave de Claude (IA Pro) ----------
-// Solo el administrador la ve. Cada persona usa su propia clave en su propio servidor.
+// La ven los administradores y los clientes del plan Claude. Cada cuenta puede poner su propia clave.
 function needsClaudeKey() {
-  // El admin usa la clave del servidor; un cliente del plan Claude, la suya.
+  // Un cliente del plan Claude usa la suya; un admin, la suya o (si el dueño lo permite) la del servidor.
   return (S.user?.role === 'admin' || !!S.user?.plan?.usesAi) && S.info?.aiEnabled === false;
 }
 
@@ -1630,12 +1753,14 @@ function renderClaudeCard(el) {
       .catch((err) => { el.innerHTML = `${head('<span class="badge warn">Sin conexión</span>')}<p class="muted tiny">${esc(err.message)}</p>`; });
     return;
   }
-  // La clave propia de un cliente no tiene "source" (solo el admin puede usar la del archivo .env).
-  const saved = st.source === 'panel' || (!('source' in st) && st.enabled);
-  const now = saved ? `✅ Clave guardada: <b>${esc(st.masked)}</b>`
-    : st.source === 'env' ? `✅ Usando la clave del archivo server/.env: <b>${esc(st.masked)}</b>. Si pegas otra aquí, se usa la nueva.`
+  // own: su propia clave. server: un admin que usa la del servidor (la del dueño), si el dueño se lo permite en el panel.
+  const saved = st.own ?? (st.enabled && !st.server);
+  const admin = S.user?.role === 'admin';
+  const now = saved ? `✅ Usas tu propia clave: <b>${esc(st.masked)}</b>. Lo que gastes se cobra en tu cuenta de Claude.`
+    : st.server ? `✅ Usas la clave de Claude del servidor: <b>${esc(st.masked)}</b>. Si pegas la tuya aquí, se usa la tuya.`
       : st.unreadable ? '⚠️ Había una clave guardada pero ya no se puede leer. Pégala otra vez.'
-        : 'Todavía no hay clave, así que la IA Pro está apagada. El modo Local funciona igual.';
+        : admin ? 'Todavía no tienes clave, así que la IA Pro está apagada. Pega la tuya, o pide al dueño del servidor que te deje usar la suya. El modo Local funciona igual.'
+          : 'Todavía no hay clave, así que la IA Pro está apagada. El modo Local funciona igual.';
   el.innerHTML = `
     ${head(st.enabled ? '<span class="badge ok">Activa</span>' : '<span class="badge bad">Falta</span>')}
     <p class="tiny" style="margin:2px 0 12px">${now}</p>
@@ -1666,7 +1791,8 @@ function renderClaudeCard(el) {
     });
   };
   $('#claudeRemove', el)?.addEventListener('click', async () => {
-    if (!(await confirmBox('¿Quitar la clave de Claude?', 'La IA Pro se apaga hasta que pongas otra. El modo Local sigue funcionando.', 'Quitar', true))) return;
+    const texto = st.puedeServidor ? 'Vuelves a usar la clave de Claude del servidor.' : 'La IA Pro se apaga hasta que pongas otra. El modo Local sigue funcionando.';
+    if (!(await confirmBox('¿Quitar tu clave de Claude?', texto, 'Quitar', true))) return;
     try { apply(await api.removeClaudeKey()); toast('Clave quitada', 'info'); } catch (err) { toast(err.message, 'bad'); }
   });
 }

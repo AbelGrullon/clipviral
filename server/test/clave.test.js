@@ -57,7 +57,8 @@ before(async () => {
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}/api`;
   const hash = await hashPassword('ClipViral-Prueba-2026');
-  const admin = db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan) VALUES ('amigo@clipviral.test', 'Amigo', ?, 'admin', 'pro247')`).run(hash);
+  // El dueño del servidor: admin que usa la clave del servidor.
+  const admin = db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan, clave_servidor) VALUES ('amigo@clipviral.test', 'Amigo', ?, 'admin', 'pro247', 1)`).run(hash);
   const user = db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan) VALUES ('cliente@clipviral.test', 'Cliente', ?, 'user', 'pro')`).run(hash);
   adminToken = createSession(admin.lastInsertRowid, 'prueba');
   userToken = createSession(user.lastInsertRowid, 'prueba');
@@ -170,7 +171,7 @@ test('plan Claude: el cliente usa SU clave, nunca la del servidor', async () => 
   const mine = [...GOOD][2];
   const r = await call('PUT', '/me/claude', { key: mine }, userToken);
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body, { enabled: true, masked: '••••••3333', unreadable: false });
+  assert.deepEqual(r.body, { enabled: true, masked: '••••••3333', own: true, server: false, puedeServidor: false, unreadable: false });
   const row = db.prepare("SELECT claude_key FROM users WHERE email = 'cliente@clipviral.test'").get();
   assert.ok(row.claude_key && !row.claude_key.includes(mine));
   assert.equal((await scan(userToken)).status, 200);
@@ -181,6 +182,49 @@ test('plan Claude: el cliente usa SU clave, nunca la del servidor', async () => 
   // El cliente no puede tocar la clave del servidor.
   assert.equal((await call('PUT', '/admin/claude', { key: mine }, userToken)).status, 403);
   assert.equal((await call('DELETE', '/me/claude', null, userToken)).body.enabled, false);
+});
+
+test('otro admin: sin permiso no gasta tu clave; puede poner la suya, o tú le das permiso en el panel', async () => {
+  const hash = await hashPassword('ClipViral-Prueba-2026');
+  const otro = db.prepare(`INSERT INTO users (email, name, pass_hash, role, plan) VALUES ('socio@clipviral.test', 'Socio', ?, 'user', 'pro247')`).run(hash);
+  const otroId = Number(otro.lastInsertRowid);
+  const otroToken = createSession(otroId, 'prueba');
+  // Lo haces admin en el panel: NO usa tu clave hasta que se lo permitas.
+  assert.equal((await call('PATCH', `/admin/users/${otroId}`, { role: 'admin' })).status, 200);
+  let st = (await call('GET', '/me/claude', null, otroToken)).body;
+  assert.deepEqual(st, { enabled: false, masked: '', own: false, server: false, puedeServidor: false, unreadable: false });
+  assert.equal((await scan(otroToken)).status, 503);
+  assert.equal((await call('GET', '/me', null, otroToken)).body.info.aiEnabled, false);
+
+  // Pone su propia clave en la app: gasta de SU cuenta.
+  const suya = [...GOOD][2];
+  assert.equal((await call('PUT', '/me/claude', { key: suya }, otroToken)).status, 200);
+  assert.equal((await scan(otroToken)).status, 200);
+  assert.equal(lastMessagesKey(), suya);
+
+  // Le das permiso en el panel: con su clave puesta, sigue usando la suya.
+  let fila = (await call('GET', '/admin/users?q=socio')).body.users[0];
+  assert.equal(fila.claveServidor, false);
+  assert.equal(fila.clavePropia, true);
+  assert.equal((await call('PATCH', `/admin/users/${otroId}`, { claveServidor: true })).status, 200);
+  assert.equal((await scan(otroToken)).status, 200);
+  assert.equal(lastMessagesKey(), suya);
+  st = (await call('GET', '/me/claude', null, otroToken)).body;
+  assert.equal(st.own, true);
+  assert.equal(st.puedeServidor, true);
+
+  // Quita la suya: ahora usa la del servidor (tiene permiso).
+  st = (await call('DELETE', '/me/claude', null, otroToken)).body;
+  assert.equal(st.server, true);
+  assert.equal(st.enabled, true);
+  assert.equal((await scan(otroToken)).status, 200);
+  assert.equal(lastMessagesKey(), [...GOOD][0]);
+
+  // Le quitas el permiso: ya no gasta tu clave.
+  assert.equal((await call('PATCH', `/admin/users/${otroId}`, { claveServidor: false })).status, 200);
+  assert.equal((await scan(otroToken)).status, 503);
+  fila = (await call('GET', '/admin/users?q=socio')).body.users[0];
+  assert.equal(fila.claveServidor, false);
 });
 
 test('al cambiar la clave, la siguiente llamada ya usa la nueva', async () => {

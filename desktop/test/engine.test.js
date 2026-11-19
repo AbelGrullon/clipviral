@@ -173,6 +173,27 @@ test('Cancelar todo (al terminar o cerrar la app) sí corta la descarga del vide
   }
 });
 
+test('grabación que termina sola: no repite "ENOENT … scandir" cuando la sesión borra la carpeta de trabajo', async (t) => {
+  const { Recorder } = require('../engine/recorder');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cv-rec-'));
+  const dir = path.join(work, 'video');
+  // yt-dlp de mentira: tarda 2,6 s y falla, así la grabación termina sola (sin tocar "Detener").
+  const r = new Recorder({ ytdlp: process.execPath, ytdlpArgs: ['-e', 'setTimeout(() => process.exit(1), 2600)', '--'],
+    ffmpeg: 'x', ffprobe: 'x', url: 'https://youtu.be/x', dir, isLive: false });
+  const warns = [];
+  r.on('warn', (w) => warns.push(w));
+  const ended = new Promise((res) => r.once('end', res));
+  r.start();
+  fs.rmSync(work, { recursive: true, force: true }); // la carpeta desaparece mientras se revisa cada 2 s
+  await wait(2300);
+  assert.deepEqual(warns, [], 'una carpeta que ya no está no es un error');
+  await ended;
+  const readdir = t.mock.method(fs, 'readdirSync');
+  await wait(2200);
+  assert.equal(readdir.mock.calls.filter((c) => c.arguments[0] === dir).length, 0, 'al terminar deja de revisar la carpeta');
+  assert.deepEqual(warns, []);
+});
+
 test('subtítulos en videos largos: cada pedazo de audio usa su tiempo exacto (no se van corriendo)', () => {
   const { parseSegmentList } = require('../engine/vod');
   // Lo que escribe FFmpeg al cortar el audio: nombre, inicio y fin dentro del video completo.

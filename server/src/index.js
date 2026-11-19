@@ -10,6 +10,7 @@ import socialRoutes from './routes/social.js';
 import callbackRoutes from './routes/callbacks.js';
 import sitioRoutes from './routes/sitio.js';
 import webRoutes from './routes/web.js';
+import botRoutes from './routes/bot.js';
 import { serveRelay } from './relay.js';
 import { postRoutes, startPublisher, canPublish } from './publicaciones.js';
 import { aiEnabled } from './claude.js';
@@ -55,6 +56,8 @@ if (CLIENTE) {
     res.json({ ok: true, plan });
   });
 }
+// Bot de Discord (discord-bot/): solo con su clave; le dice al equipo qué cuenta tiene el cliente de un ticket.
+if (!CLIENTE) app.use('/api/bot', botRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api', accountRoutes);
 app.use('/api/ai', aiRoutes);
